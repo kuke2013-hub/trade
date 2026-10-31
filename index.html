@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="theme-color" content="#0b0f16"/>
+  <meta name="description" content="Binance Breakout Laboratory — experimental crypto momentum signals and read-only paper trading."/>
+  <title>Breakout Lab — Binance research dashboard</title>
+  <link rel="stylesheet" href="./styles.css"/>
+  <script type="module" src="./app.mjs"></script>
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar">
+    <a class="brand" href="#top" aria-label="Breakout Laboratory home"><span class="logo">↗</span><span><strong>BREAKOUT<span class="accent">LAB</span></strong><small>RESEARCH TERMINAL / 01</small></span></a>
+    <div class="side-label">WORKSPACE</div>
+    <nav aria-label="Main navigation">
+      <a href="#overview" class="nav-link active"><span>▦</span> Overview</a>
+      <a href="#candidates" class="nav-link"><span>⌁</span> Pair explorer</a>
+      <a href="#paper" class="nav-link"><span>◈</span> Paper trading</a>
+      <a href="#method" class="nav-link"><span>≡</span> Methodology</a>
+    </nav>
+    <div class="side-bottom"><span class="mini-dot"></span> PUBLIC SPOT MARKET DATA<br><span class="muted">No account keys · No real orders</span></div>
+  </aside>
+  <main id="top">
+    <header class="topbar">
+      <div class="breadcrumb">RESEARCH / BINANCE / <span>USDT SPOT</span></div>
+      <div class="top-meta"><span id="clock">—</span><span class="connection" id="connection"><span class="status-dot"></span>CONNECTING</span></div>
+    </header>
+    <div class="content">
+      <section id="overview" class="hero">
+        <div class="eyebrow"><span class="tiny-square"></span> EXPERIMENT 001 / BREAKOUT DISCOVERY</div>
+        <div class="hero-line"><div><h1>Find the move <em>before</em><br>the crowd.</h1><p>Rules-based momentum research across Binance USDT spot markets. Four competing algorithms. One transparent paper-trading ledger. No promises of profit.</p></div><div class="hero-action"><button id="refresh" class="primary">↻ &nbsp; Run market scan</button><div id="scan-status" class="scan-status" role="status">Preparing market scanner…</div></div></div>
+      </section>
+      <section class="metric-grid" aria-label="Scanner metrics">
+        <div class="metric"><div class="metric-label">ELIGIBLE PAIRS</div><div id="metric-pairs" class="metric-value">—</div><div class="metric-hint">Spot · USDT · liquidity filter</div></div>
+        <div class="metric"><div class="metric-label">ANALYSED PAIRS</div><div id="metric-scanned" class="metric-value">—</div><div class="metric-hint">Closed 1h candles only</div></div>
+        <div class="metric"><div class="metric-label">LIVE SIGNALS</div><div id="metric-signals" class="metric-value highlight">—</div><div class="metric-hint">At least one strategy triggered</div></div>
+        <div class="metric"><div class="metric-label">DATA FRESHNESS</div><div id="metric-time" class="metric-value time-value">—</div><div class="metric-hint">Latest successful retrieval UTC</div></div>
+      </section>
+      <div id="error-banner" class="error-banner" hidden></div>
+      <section class="signal-panel">
+        <div class="section-header"><div><div class="eyebrow">01 / SIGNAL DESK</div><h2>Breakout watchlist</h2><p>Signals are rule triggers, not probabilities. No historical profitability has been established.</p></div><span class="data-tag">1H CLOSED BARS</span></div>
+        <div id="signals" class="signal-list"><div class="empty">Waiting for authentic Binance market data. No signals will be fabricated.</div></div>
+      </section>
+      <section id="candidates" class="pairs-panel">
+        <div class="section-header"><div><div class="eyebrow">02 / MARKET UNIVERSE</div><h2>USDT pair explorer <span class="count" id="pair-count">0</span></h2><p>Compact hourly candlesticks. Charts fetch real data as you scroll.</p></div><div class="controls"><input id="filter" type="search" placeholder="Search e.g. SOL" aria-label="Filter symbols"/><select id="sort" aria-label="Sort pairs"><option value="score">Highest setup score</option><option value="gain">24h % change</option><option value="volume">24h quote volume</option><option value="alphabetical">Symbol A–Z</option></select></div></div>
+        <div class="legend"><span><i class="legend-up"></i> Up candle</span><span><i class="legend-down"></i> Down candle</span><span class="muted">Score = heuristic 0–100, NOT a win probability</span></div>
+        <div class="card-grid" id="cards"><div class="empty">Retrieving tradable Binance pairs…</div></div>
+      </section>
+      <section id="paper" class="paper-panel">
+        <div class="section-header"><div><div class="eyebrow">03 / FORWARD EXPERIMENT</div><h2>Paper trading laboratory</h2><p>Separate virtual portfolios for each strategy. Stored only in this browser, not in your GitHub account.</p></div><div class="paper-actions"><button id="export" class="secondary">↓ Export CSV</button><button id="paper-toggle" class="primary small">Start paper engine</button></div></div>
+        <div class="notice" id="paper-notice">PAUSED · No trades will be opened until you start the simulator. It only operates while this page is open. No real money is ever used.</div>
+        <div class="portfolio-grid" id="portfolios"></div>
+        <div class="subheader"><h3>Trade ledger</h3><button id="reset" class="text-button">Reset virtual accounts</button></div>
+        <div class="table-scroll"><table><thead><tr><th>TIME (UTC)</th><th>STRATEGY</th><th>PAIR</th><th>ENTRY</th><th>EXIT</th><th>NET P&amp;L</th><th>STATUS / EXIT</th></tr></thead><tbody id="ledger"><tr><td colspan="7">No simulated positions recorded.</td></tr></tbody></table></div>
+      </section>
+      <section id="method" class="method-panel"><div class="section-header"><div><div class="eyebrow">04 / TRANSPARENCY</div><h2>What the algorithms actually do</h2><p>No machine-learning prediction has been trained or validated in this version.</p></div></div><div id="methods" class="methods"></div>
+        <div class="limitations"><h3>Important limitations</h3><p>This is a browser-run experiment. Trades are simulated from available Binance spot data, not an exchange paper account. Candlestick extrema do not reveal intraminute execution order, and simulated spread/slippage may differ materially from real fills. Missing data pauses decisions; the application never invents candles or results. The +2% target and −1.5% stop are parameters, not tested optimums. No live execution, leverage, futures or shorts are supported.</p><p>Automatic scanning is attempted periodically while this tab is open; background-tab throttling, disconnected internet, CORS limits, geographic restrictions and browser shutdown can interrupt monitoring. A persistent 24/7 service and independent out-of-sample backtests are required before considering a strategy validated.</p></div>
+      </section>
+      <footer>BREAKOUT LAB · EXPERIMENTAL RESEARCH ONLY <span>Sources: Binance public market-data API · Built for GitHub Pages</span></footer>
+    </div>
+  </main>
+</div>
+<div class="modal" id="detail" hidden><div class="modal-backdrop" data-close="1"></div><section class="modal-panel" role="dialog" aria-modal="true" aria-label="Pair analysis"><div class="modal-head"><div><div class="eyebrow">PAIR DETAIL / 1H</div><h2 id="detail-symbol">—</h2></div><button id="close-detail" class="close" aria-label="Close">×</button></div><div class="modal-data" id="detail-stats"></div><canvas id="detail-chart" width="1100" height="420" aria-label="Hourly candle chart"></canvas><div id="detail-explanation" class="explanation"></div></section></div>
+</body>
+</html>
