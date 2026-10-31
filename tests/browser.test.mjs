@@ -8,7 +8,7 @@ const dir=new URL('../',import.meta.url);
 const port=8767;
 const server=createServer(async(req,res)=>{
   try{const rel=req.url==='/'?'index.html':decodeURIComponent(req.url.slice(1));
-    if(!['index.html','styles.css','app.mjs','engine.mjs'].includes(rel)){res.writeHead(404);res.end('Not found');return;}
+    if(!['index.html','styles.css','app.mjs','engine.mjs','trade-chart.mjs'].includes(rel)){res.writeHead(404);res.end('Not found');return;}
     const bytes=await readFile(new URL(rel,dir));
     res.writeHead(200,{'Content-Type':extname(rel)==='.css'?'text/css':extname(rel)==='.html'?'text/html':'text/javascript'});res.end(bytes);
   }catch(e){res.writeHead(500);res.end(String(e));}
