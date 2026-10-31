@@ -19,6 +19,8 @@ export function atr(cs,period=14){if(cs.length<period+1)return NaN;const a=[];fo
 export function analyse(candles,btcReturn24h=0){
   const c=candles, n=c.length;
   if(n<55)return null;
+  // Prevent treating hours-long exchange data gaps as consecutive observations.
+  for(let i=n-54;i<n;i++)if(c[i].time-c[i-1].time!==3600000)return null;
   const last=c[n-1], prior=c.slice(n-25,n-1), prev20=c.slice(n-21,n-1);
   const resistance=Math.max(...prior.map(x=>x.high));
   const avgVol=sma(prev20.map(x=>x.volume));

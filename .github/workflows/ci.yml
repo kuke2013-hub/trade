@@ -15,4 +15,16 @@ jobs:
         with:
           node-version: '22'
       - run: node --check app.mjs && node --check engine.mjs
-      - run: node --test tests/*.test.mjs
+      - run: node --test tests/engine.test.mjs
+      - name: Install browser for integration test
+        run: |
+          npm install --no-save --no-audit --no-fund playwright
+          npx playwright install --with-deps chromium
+      - name: Verify actual dashboard interactions against deterministic market fixtures
+        run: node tests/browser.test.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dashboard-screenshot
+          path: dashboard-smoke.png
+          if-no-files-found: ignore

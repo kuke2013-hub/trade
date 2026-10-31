@@ -26,6 +26,7 @@ test('breakout signal requires actual close above preceding resistance',()=>{
   assert.equal(analyse(series()).trigger.breakout,true);
   assert.equal(analyse(series({breakout:false})).trigger.breakout,false);
 });
+test('missing hourly bars suppress stale predictive signals',()=>{const c=series();c[40].time+=3600000;assert.equal(analyse(c),null);});
 test('volume signal responds to volume ratio, never future bars',()=>{
   const a=analyse(series({volume:250}));
   assert.equal(a.trigger.volume,true);

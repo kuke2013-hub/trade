@@ -61,3 +61,7 @@ The ranking score adds weighted breakout, trend, relative-strength, volume and c
 This application has **no Binance trading permissions, private-account access or order submission code**. There is no API-key collection and no hidden demo-data mode. Do not treat rankings as investment advice.
 
 Data sources: [Binance market-data-only API](https://github.com/binance/binance-spot-api-docs/blob/master/faqs/market_data_only.md), [Binance candlestick reference](https://github.com/binance/binance-spot-api-docs/blob/master/rest-api.md).
+
+## Automated validation
+
+The GitHub Actions pipeline runs **11 deterministic unit tests** for candle filtering, all four signal models, fees, stop/target ambiguity, time-based exits, data-gap rejection and duplicate orders. It also runs a Chromium/Playwright **UI integration smoke test** against explicitly synthetic exchange-shaped fixtures (no synthetic data is shipped in the production application). The browser test checks large-universe rendering, a confirmed breakout, a simulated order, chart drill-down and symbol filtering. These confirm software behaviour, **not** profitability or real-world exchange availability.
