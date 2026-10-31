@@ -18,11 +18,21 @@ const now=Date.now(),h=3600000;
 const symbols=['BTCUSDT','MOMUSDT','NEARUSDT',...Array.from({length:270},(_,i)=>`ALT${String(i).padStart(3,'0')}USDT`)];
 const info={symbols:symbols.map(symbol=>({symbol,quoteAsset:'USDT',status:'TRADING',isSpotTradingAllowed:true}))};
 const tickers=symbols.map((symbol,i)=>({symbol,lastPrice:symbol==='MOMUSDT'?'103.5':'100',priceChangePercent:symbol==='MOMUSDT'?'35':String(i%10-4),quoteVolume:symbol==='MOMUSDT'?'40000000':String(2000000+i*100000)}));
-const bars=(symbol,interval)=>{
+const bars=(symbol,interval,query=new URLSearchParams())=>{
   const step={'1m':60000,'3m':180000,'5m':300000,'1h':3600000,'1d':86400000,'1w':604800000,'1M':2592000000}[interval];
   if(!step)throw new Error('Unexpected interval: '+interval);
+  // Recorded paper trades request an actual historical 1m window around the entry/exit.
+  // The fixture honours start/end bounds; it never constructs a synthetic trade itself.
+  if(interval==='1m'&&query.has('startTime')){
+    const start=+query.get('startTime'),end=Math.min(Date.now(),+query.get('endTime'));
+    const count=Math.max(2,Math.min(180,Math.ceil((end-start)/step)));
+    return Array.from({length:count},(_,i)=>{
+      const t=start+i*step,p=103.5+(i%4)*.08;
+      return [t,String(p-.12),String(p+.35),String(p-.3),String(p),String(200),t+step-1];
+    });
+  }
   return Array.from({length:95},(_,i)=>{
-    const t=now-(95-i)*step-180000;
+    const t=interval==='1m'?now-(94-i)*step-30000:now-(95-i)*step-180000;
     let p=symbol==='NEARUSDT'?96+i*.04:100+(i%2)*.2,vol=100,open=p-.1,hi=p+.7,lo=p-.8;
     if(i===94&&symbol==='MOMUSDT'){p=103.5;open=101;hi=104;lo=100.4;vol=500;}
     return [t,String(open),String(hi),String(lo),String(p),String(vol),t+step-1];
@@ -49,7 +59,7 @@ try{
     if(p.endsWith('exchangeInfo')){exchangeCalls++;body=info;}
     else if(p.endsWith('ticker/24hr')){tickerCalls++;body=tickers;}
     else if(p.endsWith('bookTicker'))body={symbol:u.searchParams.get('symbol'),askPrice:'104',bidPrice:'103.9'};
-    else if(p.endsWith('klines')){const interval=u.searchParams.get('interval');seenIntervals.add(interval);intervalRequests.set(interval,(intervalRequests.get(interval)||0)+1);if(interval==='1h')hourlyCalls++;body=bars(u.searchParams.get('symbol'),interval);}
+    else if(p.endsWith('klines')){const interval=u.searchParams.get('interval');seenIntervals.add(interval);intervalRequests.set(interval,(intervalRequests.get(interval)||0)+1);if(interval==='1h')hourlyCalls++;body=bars(u.searchParams.get('symbol'),interval,u.searchParams);}
     else throw new Error('Unexpected Binance route '+p);
     await route.fulfill({status:200,contentType:'application/json',headers:{'access-control-allow-origin':'*'},body:JSON.stringify(body)});
   });
@@ -69,9 +79,12 @@ try{
   assert.equal(await page.locator('#approaching .signal-tile').first().getAttribute('data-symbol'),'MOMUSDT','Confirmed breakout must be pinned first');
   assert.equal(await page.locator('#approaching .signal-tile').nth(1).getAttribute('data-symbol'),'NEARUSDT','Approaching candidate must follow confirmed breakout');
   assert.equal(await page.locator('#approaching .breakout-tile').count(),1,'Confirmed breakouts must use red-highlight class');
-  assert.equal(await page.locator('#approaching .near-tile').count(),1,'Approaching candidates retain normal styling');
+  assert.equal(await page.locator('#approaching .near-tile').count(),1,'Approaching candidate remains visible behind confirmed');
+  assert.ok(Number.parseFloat(await page.locator('#approaching .near-tile').evaluate(el=>getComputedStyle(el).borderTopWidth))>=1,'Approaching candidates have a visible single red border');
+  assert.equal(await page.locator('#approaching .breakout-tile').evaluate(el=>getComputedStyle(el).outlineStyle),'solid','Confirmed breakout has a second outline');
+  assert.ok(Number.parseFloat(await page.locator('#approaching .breakout-tile').evaluate(el=>getComputedStyle(el).outlineWidth))>=2,'Confirmed breakout has a 2px second red outline');
   assert.match(await page.locator('#approaching .breakout-tile .tile-label').innerText(),/CONFIRMED BREAKOUT/);
-  assert.equal(await page.locator('#approaching .breakout-tile').evaluate(el=>getComputedStyle(el).animationName),'breakoutPulse','Confirmed breakout must gently pulse');
+  assert.equal(await page.locator('#approaching .breakout-tile').evaluate(el=>getComputedStyle(el).animationName),'confirmedDoublePulse','Confirmed breakout must gently pulse with its double outline');
   assert.equal(await page.locator('section.signal-panel[hidden]').count(),1,'Obsolete standalone section must be hidden');
   assert.ok((await page.locator('.coin-card[data-symbol="NEARUSDT"] .indicator-meter').count())===3);
   assert.equal(pageErrors.length,0,'No runtime exceptions: '+pageErrors.join(' | '));
@@ -82,6 +95,17 @@ try{
   assert.ok(state.portfolios.breakout.positions[0].entryFee>0);
   const card=page.locator('.coin-card[data-symbol="MOMUSDT"]');
   await card.click();assert.equal(await page.locator('#detail-symbol').innerText(),'MOMUSDT');
+  assert.equal(await page.locator('#detail-timeframes button.active').getAttribute('data-interval'),'1m','Recorded paper entry opens the precise 1m chart');
+  await page.waitForFunction(()=>document.querySelector('#detail-chart')?.dataset.tradeMarkers?.includes('buy'),{timeout:20000});
+  assert.match(await page.locator('#detail-trade-summary').innerText(),/SIM BUY/);
+  assert.match(await page.locator('#detail-trade-summary').innerText(),/STOP TRIGGER/);
+  assert.match(await page.locator('#detail-trade-summary').innerText(),/TAKE PROFIT TRIGGER/);
+  assert.equal(await page.locator('#detail-chart').getAttribute('data-trade-status'),'open');
+  assert.equal(await page.locator('#trade-window-exit').isDisabled(),true);
+  await page.locator('#detail-trade-windows button[data-window="latest"]').click();
+  await page.waitForFunction(()=>document.querySelector('#detail-chart-note')?.textContent.includes('latest minute window'),{timeout:20000});
+  await page.locator('#detail-trade-windows button[data-window="entry"]').click();
+  await page.waitForFunction(()=>document.querySelector('#detail-chart')?.dataset.tradeMarkers?.includes('buy'),{timeout:20000});
   await page.waitForFunction(()=>document.querySelectorAll('#detail-indicators .detail-indicator').length>=8,{timeout:20000});
   assert.match(await page.locator('#detail-indicators').innerText(),/RSI \(14\)/);
   assert.match(await page.locator('#detail-indicators').innerText(),/MACD HIST/);
@@ -91,6 +115,11 @@ try{
     await page.waitForFunction(interval=>document.querySelector('#detail-chart')?.dataset.interval===interval,interval,{timeout:20000});
     assert.equal(await page.locator('#detail-timeframes button.active').getAttribute('data-interval'),interval);
   }
+  await page.locator('#close-detail').click();
+  await page.locator('.coin-card[data-symbol="NEARUSDT"]').click();
+  assert.match(await page.locator('#detail-paper-hint').innerText(),/No paper entry is recorded/);
+  assert.equal(await page.locator('#detail-trade-select').isHidden(),true);
+  assert.equal(await page.locator('#detail-chart').getAttribute('data-trade-markers'),null);
   await page.locator('#close-detail').click();
   // The global selector switches all visible cards and persists the user's selection.
   await page.locator('#chart-timeframes button[data-interval="3m"]').click();
@@ -119,6 +148,25 @@ try{
   assert.equal(hourlyCalls,beforeHourly,'Unchanged 1h candle histories should remain cached');
   await page.waitForFunction(()=>document.querySelector('#scan-status')?.textContent.includes('live rankings ~1 min'),{timeout:30000});
   assert.match(await page.locator('#scan-status').innerText(),/live rankings ~1 min/);
+  // Mark the actual recorded breakout paper position closed in local test storage,
+  // then rehydrate it. The market chart must show both stored timestamps, never a fake signal.
+  await page.evaluate(()=>{
+    const state=JSON.parse(localStorage.getItem('breakout-paper-v1'));
+    const p=state.portfolios.breakout;
+    const t=p.positions.shift();
+    t.exitTime=Date.now();t.exitPrice=t.entryPrice*1.01;t.exitMarket=t.exitPrice;t.reason='target';t.pnl=1.75;t.proceeds=t.cost+t.pnl;t.returnPct=.875;t.exitFee=.19;
+    p.trades.push(t);localStorage.setItem('breakout-paper-v1',JSON.stringify(state));
+  });
+  await page.reload({waitUntil:'domcontentloaded'});
+  await page.waitForFunction(()=>document.querySelector('.trade-ledger-row[data-symbol="MOMUSDT"]'),{timeout:30000});
+  await page.locator('.trade-ledger-row[data-symbol="MOMUSDT"]').first().click();
+  await page.waitForFunction(()=>document.querySelector('#detail-chart')?.dataset.tradeMarkers?.includes('sell'),{timeout:20000});
+  assert.match(await page.locator('#detail-trade-summary').innerText(),/SIM SELL/);
+  assert.equal(await page.locator('#trade-window-exit').isDisabled(),false);
+  await page.locator('#detail-trade-windows button[data-window="exit"]').click();
+  await page.waitForFunction(()=>document.querySelector('#detail-chart-note')?.textContent.includes('exit minute window'),{timeout:20000});
+  assert.ok((await page.locator('#detail-chart').getAttribute('data-trade-markers')).includes('sell'));
+  await page.locator('#close-detail').click();
   await page.screenshot({path:'dashboard-smoke.png'});
   console.log(`UI INTEGRATION PASSED: ${pairs} pairs, ${analysed} analysed, ${signals} signal(s), all seven chart intervals, approaching-resistance rank and technical indicators, paper entry, filter/detail operational.`);
 }finally{if(browser)await browser.close();await new Promise(resolve=>server.close(resolve));}

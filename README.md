@@ -64,7 +64,7 @@ Data sources: [Binance market-data-only API](https://github.com/binance/binance-
 
 ## Automated validation
 
-The GitHub Actions pipeline runs **17 deterministic unit tests** for candle filtering, all four signal models, fees, stop/target ambiguity, time-based exits, data-gap rejection and duplicate orders. It also runs a Chromium/Playwright **UI integration smoke test** against explicitly synthetic exchange-shaped fixtures (no synthetic data is shipped in the production application). The browser test checks large-universe rendering, approaching-resistance priority, a confirmed breakout, a simulated order, detailed technical indicators, seven chart intervals, manual refreshed-bar requests and symbol filtering. These confirm software behaviour, **not** profitability or real-world exchange availability.
+The GitHub Actions pipeline runs **21 deterministic unit tests** for candle filtering, all four signal models, fees, stop/target ambiguity, time-based exits, data-gap rejection and duplicate orders. It also runs a Chromium/Playwright **UI integration smoke test** against explicitly synthetic exchange-shaped fixtures (no synthetic data is shipped in the production application). The browser test checks large-universe rendering, approaching-resistance priority, a confirmed breakout, a simulated order, detailed technical indicators, seven chart intervals, manual refreshed-bar requests and symbol filtering. These confirm software behaviour, **not** profitability or real-world exchange availability.
 
 ## Chart timeframes
 
@@ -73,3 +73,11 @@ Use the **CANDLE INTERVAL** buttons above the pair cards to change all small cha
 ## Breakout radar interface
 
 The top **Potential and confirmed breakouts** section now combines two distinct classifications: up to eight **confirmed hourly breakouts** appear first in red-bordered cards with a gentle pulsing glow; up to eight **approaching-resistance** candidates appear immediately afterward in standard teal styling. The animation respects reduced-motion accessibility preferences. Each card retains its existing detailed analysis on click. There is no longer a second visible confirmed-breakout section. This is a UI/ranking presentation change only: the four trading algorithms, hourly entry requirements, fee assumptions, and paper-trading logic are unchanged. A red card is a rule trigger, not proof of future price gains.
+
+## Confirmed-breakout highlights and paper-trade chart markers
+
+- The first radar includes **confirmed hourly breakouts first**, each with a **double red outline and subtly pulsing glow**. Approaching-resistance candidates follow with a **single red border**. The same treatment is applied to eligible cards in the larger pair explorer. This is visual prioritisation, **not a claim of future profit**.
+- Clicking a pair with a **recorded local paper position** automatically opens its **1-minute** detailed chart. A trade selector can choose among paper positions belonging to different models and older closed trades for that pair. Clicking a trade in the ledger opens exactly that trade.
+- The 1-minute chart overlays the **actual recorded simulated entry timestamp and fill**, the simulator's **stop-loss trigger quote**, its **+2% take-profit/sell trigger**, and—for closed trades—the **recorded simulated sell timestamp and execution price**. Stop and target trigger quotes reflect the configured simulated exit slippage.
+- **Entry window** loads historical minute candles around the entry; **Sell window** jumps to the exit (only available for closed trades); **Latest** shows the current minute candles. This avoids pretending that an old trade occurred on the latest candle. Markers are plotted only when Binance 1-minute candles actually cover the stored event timestamp. If historical candles are unavailable, the chart reports the failure rather than manufacturing a marker.
+- Signal-only pairs have no trade markers. These are **browser-local hypothetical fills**, not orders placed at Binance. Minute OHLC charts establish only minute-level context; they cannot prove actual tick-by-tick fills or accurate bid/ask replay.

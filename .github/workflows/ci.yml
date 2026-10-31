@@ -14,8 +14,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: node --check app.mjs && node --check engine.mjs
-      - run: node --test tests/engine.test.mjs
+      - run: node --check app.mjs && node --check engine.mjs && node --check trade-chart.mjs
+      - run: node --test tests/engine.test.mjs tests/trade-chart.test.mjs
       - name: Install browser for integration test
         run: |
           npm install --no-save --no-audit --no-fund playwright

@@ -1,10 +1,11 @@
 import {STRATEGIES,DEFAULT_CONFIG,parseKlines,analyse,hourlyCacheCurrent,withLiveReadiness,createState,openPaper,closePaper,evaluateExit,portfolioStats,indicators,emaSeries} from './engine.mjs';
+import {tradeKey,recordedTrades,tradeLevels,tradeMinuteWindow,minuteMarkerPosition} from './trade-chart.mjs';
 const API='https://data-api.binance.vision/api/v3/';
 // Display-only candle intervals. Strategy signals and trade entries continue to use completed 1h bars.
 const CHART_LABELS=Object.freeze({'1M':'1 month','1w':'1 week','1d':'1 day','1h':'1 hour','5m':'5 minutes','3m':'3 minutes','1m':'1 minute'});
 const savedInterval=localStorage.getItem('breakout-chart-interval');
 let chartInterval=Object.hasOwn(CHART_LABELS,savedInterval)?savedInterval:'1h';
-let detailInterval=chartInterval,detailSymbol=null,detailRequest=0;
+let detailInterval=chartInterval,detailSymbol=null,detailRequest=0,selectedTradeKey=null,tradeWindow='entry';
 const displayCandles=new Map(),displayInFlight=new Map();
 // Intervals are whitelisted above. Cache keys include symbol + interval to prevent cross-timeframe corruption.
 function displayKey(symbol,interval){return `${symbol}|${interval}`;}
@@ -24,6 +25,38 @@ async function loadDisplayBars(symbol,interval,force=false){
   })();
   displayInFlight.set(key,request);
   try{return await request;}finally{displayInFlight.delete(key);}
+}
+// Historical 1m candles around a recorded trade, rather than the last 95 minutes.
+// A newly opened trade is refreshed frequently; historical closed trades can be cached.
+const tradeMinuteCache=new Map();
+async function loadTradeMinuteBars(symbol,trade,windowMode,force=false){
+  const range=tradeMinuteWindow(trade,windowMode),key=`${symbol}|${tradeKey(trade)}|${windowMode}|${trade.exitTime??'open'}`;
+  const cached=tradeMinuteCache.get(key),ttl=trade.exitTime?600000:30000;
+  if(cached&&!force&&Date.now()-cached.when<ttl)return cached.bars;
+  const raw=await json(`klines?symbol=${encodeURIComponent(symbol)}&interval=1m&startTime=${range.startTime}&endTime=${range.endTime}&limit=180`);
+  const bars=parseKlines(raw,Infinity);
+  if(bars.length<2)throw new Error('Insufficient Binance minute data around this paper trade');
+  tradeMinuteCache.set(key,{when:Date.now(),bars});
+  return bars;
+}
+function activeTrade(){return recordedTrades(paper,detailSymbol).find(t=>tradeKey(t)===selectedTradeKey)||null;}
+function timeUTC(t){return Number.isFinite(t)?new Date(t).toISOString().replace('T',' ').slice(0,19)+' UTC':'—';}
+function renderTradeControls(){
+  const section=$('detail-paper'),select=$('detail-trade-select'),hint=$('detail-paper-hint');
+  const trades=recordedTrades(paper,detailSymbol);
+  section.hidden=false;
+  if(!trades.length){selectedTradeKey=null;select.hidden=true;$('detail-trade-windows').hidden=true;$('detail-trade-summary').hidden=true;hint.textContent='No paper entry is recorded for this pair in this browser. A breakout signal alone is NOT a paper trade.';return null;}
+  if(!trades.some(t=>tradeKey(t)===selectedTradeKey))selectedTradeKey=tradeKey(trades[0]);
+  select.hidden=false;select.innerHTML=trades.map(t=>`<option value="${escape(tradeKey(t))}">${escape(STRATEGIES.find(s=>s.id===t.strategyId)?.name||t.strategyId)} · ${escape(timeUTC(t.entryTime))} · ${t.exitTime?'CLOSED':'OPEN'}</option>`).join('');
+  select.value=selectedTradeKey;
+  $('detail-trade-windows').hidden=detailInterval!=='1m';
+  hint.textContent=detailInterval==='1m'?'Exact paper-fill timestamps and levels. Choose ENTRY or EXIT window to inspect a trade outside the most recent candles.':'Select 1m to see exact simulated trade markers on Binance minute candles.';
+  const trade=trades.find(t=>tradeKey(t)===selectedTradeKey),levels=tradeLevels(trade,paper.config);
+  $('detail-trade-summary').hidden=false;
+  $('detail-trade-summary').innerHTML=`<span><strong>SIM BUY</strong> ${num(levels.entry,6)} · ${escape(timeUTC(levels.entryTime))}</span><span><strong>STOP TRIGGER</strong> ${num(levels.stopTrigger,6)}</span><span><strong>TAKE PROFIT TRIGGER</strong> ${num(levels.targetTrigger,6)}</span><span><strong>${levels.exitTime?'SIM SELL':'POSITION'}</strong> ${levels.exitTime?num(levels.exit,6)+' · '+escape(timeUTC(levels.exitTime)):'OPEN'}</span>`;
+  $('trade-window-exit').disabled=!levels.exitTime;
+  for(const button of $('detail-trade-windows').querySelectorAll('button[data-window]'))button.classList.toggle('active',button.dataset.window===tradeWindow);
+  return trade;
 }
 function selectInterval(container,interval){
   document.querySelectorAll(`#${container} [data-interval]`).forEach(b=>{
@@ -106,7 +139,7 @@ function orderPairs(){const sort=$('sort').value,find=$('filter').value.trim().t
   if(sort==='distance'){const xd=x?.distancePct>0?x.distancePct:Infinity,yd=y?.distancePct>0?y.distancePct:Infinity;return xd-yd||b.volume-a.volume;}
   return stageWeight(x)-stageWeight(y)||((y?.stage==='confirmed'?y?.score:y?.readinessScore)??-1)-((x?.stage==='confirmed'?x?.score:x?.readinessScore)??-1)||b.volume-a.volume;
 });return arr;}
-function cardHTML(m){const a=scores.get(m.symbol),sc=a?String(a.stage==='confirmed'?a.score:a.readinessScore):'—';return `<article class="coin-card" data-symbol="${escape(m.symbol)}" tabindex="0" role="button" aria-label="Open ${escape(m.symbol)} analysis"><div class="card-top"><div><div class="symbol">${escape(quote(m.symbol))}<span class="pair-quote">/USDT</span></div><div class="small-muted">24H ${pct(m.change)}</div></div><div><div class="score">${sc}</div><span class="score-label">${a?.stage==='confirmed'?'BREAKOUT':'READINESS'} /100</span></div></div><div class="card-stage ${a?.stage||'unscanned'}">${stageLabel(a)}</div><canvas width="560" height="210" aria-label="${escape(CHART_LABELS[chartInterval])} candle chart for ${escape(m.symbol)}"></canvas>${compactMeters(a)}<div class="card-bottom"><span>${a?triggers(a).length+' triggered models':'UNSCANNED'}</span><span class="${m.change>=0?'up':'down'}">VOL ${m.volume>=1e6?num(m.volume/1e6,1)+'M':num(m.volume/1e3,0)+'K'} USDT</span></div></article>`;}
+function cardHTML(m){const a=scores.get(m.symbol),sc=a?String(a.stage==='confirmed'?a.score:a.readinessScore):'—';return `<article class="coin-card ${a?.stage==='approaching'?'near-signal-card':a?.stage==='confirmed'?'confirmed-signal-card':''}" data-symbol="${escape(m.symbol)}" tabindex="0" role="button" aria-label="Open ${escape(m.symbol)} analysis"><div class="card-top"><div><div class="symbol">${escape(quote(m.symbol))}<span class="pair-quote">/USDT</span></div><div class="small-muted">24H ${pct(m.change)}</div></div><div><div class="score">${sc}</div><span class="score-label">${a?.stage==='confirmed'?'BREAKOUT':'READINESS'} /100</span></div></div><div class="card-stage ${a?.stage||'unscanned'}">${stageLabel(a)}</div><canvas width="560" height="210" aria-label="${escape(CHART_LABELS[chartInterval])} candle chart for ${escape(m.symbol)}"></canvas>${compactMeters(a)}<div class="card-bottom"><span>${a?triggers(a).length+' triggered models':'UNSCANNED'}</span><span class="${m.change>=0?'up':'down'}">VOL ${m.volume>=1e6?num(m.volume/1e6,1)+'M':num(m.volume/1e3,0)+'K'} USDT</span></div></article>`;}
 function renderCards(){
   if(observer)observer.disconnect();visibleSymbols.clear();
   const cards=$('cards'),arr=orderPairs();cards.innerHTML=arr.length?arr.map(cardHTML).join(''):'<div class="empty">No matching trading pairs.</div>';
@@ -136,10 +169,15 @@ async function refreshVisibleCharts(force=false){
     }
   }finally{chartRefreshBusy=false;}
 }
-function drawCandles(canvas,bars,resistance=null,overlays=false){
+function drawCandles(canvas,bars,resistance=null,overlays=false,trade=null){
   const context=canvas.getContext('2d');if(!context||!bars?.length)return;
   const W=canvas.width,H=canvas.height;context.clearRect(0,0,W,H);
-  const data=bars.slice(-48);const low=Math.min(...data.map(c=>c.low)),high=Math.max(...data.map(c=>c.high)),span=Math.max(high-low,low*0.00001);
+  const data=bars.slice(trade?-180:-48);
+  const levels=trade?tradeLevels(trade,paper.config):null;
+  const prices=[...data.map(c=>c.low),...data.map(c=>c.high)];
+  if(levels)prices.push(levels.entry,levels.stopTrigger,levels.targetTrigger,...(levels.exit?[levels.exit]:[]));
+  const minPrice=Math.min(...prices),maxPrice=Math.max(...prices),padding=Math.max((maxPrice-minPrice)*.06,minPrice*.0001);
+  const low=minPrice-padding,high=maxPrice+padding,span=Math.max(high-low,low*.00001);
   const top=H*.07,bottom=H*.77,left=10,right=W-10;
   const yy=p=>bottom-(p-low)/span*(bottom-top),step=(right-left)/data.length;
   context.strokeStyle='#293645';context.lineWidth=1;for(let i=0;i<4;i++){const y=top+(bottom-top)*i/3;context.beginPath();context.moveTo(left,y);context.lineTo(right,y);context.stroke();}
@@ -151,6 +189,39 @@ function drawCandles(canvas,bars,resistance=null,overlays=false){
     for(const line of series){context.strokeStyle=line.color;context.lineWidth=2;context.beginPath();let started=false;const offset=bars.length-data.length;
       for(let i=0;i<data.length;i++){const v=line.values[offset+i];if(!Number.isFinite(v)){started=false;continue;}const x=left+step*(i+.5);if(!started){context.moveTo(x,yy(v));started=true;}else context.lineTo(x,yy(v));}context.stroke();}
   }
+  if(levels){
+    // Draw reference levels even if the matching event timestamp lies outside this window;
+    // an entry/sell marker is drawn ONLY when the genuine minute candle contains its timestamp.
+    const horizontals=[
+      {price:levels.entry,label:'ENTRY FILL',color:'#5ee5cc',dash:[]},
+      {price:levels.stopTrigger,label:'STOP TRIGGER',color:'#ff6c80',dash:[8,5]},
+      {price:levels.targetTrigger,label:'SELL TARGET',color:'#f4c16c',dash:[8,5]},
+    ];
+    if(levels.exit!==null&&levels.exitTime!==null)horizontals.push({price:levels.exit,label:'ACTUAL SIM SELL',color:'#b39aff',dash:[3,4]});
+    horizontals.forEach(({price,label,color,dash},i)=>{
+      context.setLineDash(dash);context.strokeStyle=color;context.lineWidth=1.6;
+      context.beginPath();context.moveTo(left,yy(price));context.lineTo(right,yy(price));context.stroke();context.setLineDash([]);
+      context.font='bold 10px ui-sans-serif, sans-serif';const width=context.measureText(label).width+13;
+      context.fillStyle='#081019dc';context.fillRect(right-width-1,yy(price)-13,width+4,15);
+      context.font='bold 10px ui-sans-serif, sans-serif';context.fillStyle=color;context.fillText(label,right-width+4,yy(price)-2);
+    });
+    const markers=[{time:levels.entryTime,price:levels.entry,label:'BUY',color:'#5ee5cc'}];
+    if(levels.exitTime!==null&&levels.exit!==null)markers.push({time:levels.exitTime,price:levels.exit,label:'SELL',color:'#b39aff'});
+    const drawn=[];
+    markers.forEach(({time,price,label,color})=>{
+      const x=minuteMarkerPosition(data,time,left,right);
+      if(x===null)return;
+      const y=yy(price);context.setLineDash([4,5]);context.strokeStyle=color;context.lineWidth=1.25;
+      context.beginPath();context.moveTo(x,top);context.lineTo(x,bottom);context.stroke();context.setLineDash([]);
+      context.beginPath();context.arc(x,y,6,0,Math.PI*2);context.fillStyle=color;context.fill();
+      context.strokeStyle='#090d14';context.lineWidth=2;context.stroke();
+      const labelX=Math.min(right-42,Math.max(left+4,x+9));context.font='bold 11px ui-sans-serif, sans-serif';context.fillStyle=color;context.fillText(label,labelX,Math.max(top+13,y-11));
+      drawn.push(label.toLowerCase());
+    });
+    canvas.dataset.tradeMarkers=drawn.join(',');
+    canvas.dataset.tradeEntry=String(levels.entryTime);
+    canvas.dataset.tradeStatus=levels.exitTime===null?'open':'closed';
+  }else{delete canvas.dataset.tradeMarkers;delete canvas.dataset.tradeEntry;delete canvas.dataset.tradeStatus;}
 }
 function drawCard(node,symbol,interval,bars){if(!node.isConnected||chartInterval!==interval)return;const canvas=node.querySelector('canvas');drawCandles(canvas,bars,interval==='1h'?scores.get(symbol)?.resistance:null);canvas.dataset.interval=interval;
   const score=scores.get(symbol);if(score){node.querySelector('.score').textContent=score.stage==='confirmed'?score.score:score.readinessScore;node.querySelector('.card-bottom span').textContent=triggers(score).length+' triggered models';}}
@@ -158,9 +229,9 @@ function renderApproaching(){
   const confirmed=markets.filter(m=>triggers(scores.get(m.symbol)).length).sort((a,b)=>(scores.get(b.symbol).score-scores.get(a.symbol).score));
   const near=markets.filter(m=>scores.get(m.symbol)?.stage==='approaching').sort((a,b)=>scores.get(b.symbol).readinessScore-scores.get(a.symbol).readinessScore);
   const merged=[...confirmed.slice(0,8).map(m=>({kind:'confirmed',m,a:scores.get(m.symbol)})),...near.slice(0,8).map(m=>({kind:'approaching',m,a:scores.get(m.symbol)}))];
-  $('metric-near').textContent=near.length;$('near-count').textContent=merged.length;
+  $('metric-near').textContent=near.length;$('near-count').textContent=near.length+confirmed.length;
   $('approaching').innerHTML=merged.length?merged.map(({kind,m,a})=>{
-    if(kind==='confirmed')return `<div class="signal-tile breakout-tile" data-symbol="${escape(m.symbol)}" tabindex="0" role="button"><div class="tile-top"><div><div class="symbol">${escape(quote(m.symbol))}<span class="pair-quote">/USDT</span></div><div class="small-muted">24H ${pct(m.change)} · confirmed hourly breakout</div></div><div><div class="score">${a.score}</div><div class="score-label">BREAKOUT /100</div></div></div><div class="tile-details">Relative strength vs BTC: ${pct(a.relative)}<br>Volume / 20h avg: ${num(a.volumeRatio,1)}× · Models: ${triggers(a).length}</div><div class="mini-progress breakout-progress"><span style="width:100%"></span></div><span class="tile-label breakout-label">CONFIRMED BREAKOUT · ${escape(triggers(a).map(s=>s.name).join(' · '))}</span></div>`;
+    if(kind==='confirmed')return `<div class="signal-tile breakout-tile" data-symbol="${escape(m.symbol)}" tabindex="0" role="button"><div class="tile-top"><div><div class="symbol">${escape(quote(m.symbol))}<span class="pair-quote">/USDT</span></div><div class="small-muted">24H ${pct(m.change)} · confirmed hourly breakout</div></div><div><div class="score">${a.score}</div><div class="score-label">BREAKOUT /100</div></div></div><div class="tile-details">Relative strength vs BTC: ${pct(a.relative)}<br>Volume / 20h avg: ${num(a.volumeRatio,1)}× · Models: ${triggers(a).length}</div><div class="mini-progress breakout-progress"><span style="width:100%"></span></div><span class="tile-label breakout-label">ENTRY SIGNAL · ${escape(triggers(a).map(s=>s.name).join(' · '))}</span></div>`;
     return `<div class="signal-tile near-tile" data-symbol="${escape(m.symbol)}" tabindex="0" role="button"><div class="tile-top"><div><div class="symbol">${escape(quote(m.symbol))}<span class="pair-quote">/USDT</span></div><div class="small-muted">${num(a.distancePct,2)}% below 24h resistance</div></div><div><div class="score">${a.readinessScore}</div><div class="score-label">READINESS /100</div></div></div><div class="tile-details">RSI(14): ${num(a.technical.rsi14,1)} · Volume: ${num(a.volumeRatio,2)}×<br>Relative to BTC: ${pct(a.relative)} · Trend: ${a.trend?'bullish':'unconfirmed'}</div><div class="mini-progress"><span style="width:${a.proximity.toFixed(1)}%"></span></div><span class="tile-label">APPROACHING · NO ENTRY SIGNAL</span></div>`;
   }).join(''):'<div class="empty">No liquid analysed pairs currently meet the breakout-radar criteria. No prediction is implied.</div>';
   $('approaching').querySelectorAll('[data-symbol]').forEach(n=>{n.addEventListener('click',()=>detail(n.dataset.symbol));n.addEventListener('keydown',e=>{if(e.key==='Enter')detail(n.dataset.symbol);});});
@@ -169,25 +240,30 @@ function renderSignals(){const matches=markets.filter(x=>triggers(scores.get(x.s
   const target=$('signals');if(!target)return;
   target.innerHTML=matches.length?'<div class="empty">Confirmed breakouts are now pinned at the front of the breakout radar above and outlined in red.</div>':'<div class="empty">No confirmed breakout triggers among analysed pairs. This is a valid no-trade result.</div>';
 }
-async function detail(symbol){
-  detailSymbol=symbol;
+async function detail(symbol,preferredTradeKey=null){
+  if(detailSymbol!==symbol)selectedTradeKey=null;
+  detailSymbol=symbol;if(preferredTradeKey)selectedTradeKey=preferredTradeKey;
   $('detail').hidden=false;$('detail-symbol').textContent=symbol;
-  detailInterval=chartInterval;selectInterval('detail-timeframes',detailInterval);
+  // A recorded paper trade opens at 1m by default to show its actual minute timestamp.
+  detailInterval=preferredTradeKey||recordedTrades(paper,symbol).length?'1m':chartInterval;
+  tradeWindow='entry';selectInterval('detail-timeframes',detailInterval);
   await updateDetail();
 }
 async function updateDetail(force=false){
   if(!detailSymbol||$('detail').hidden)return;
   const symbol=detailSymbol,interval=detailInterval,requestId=++detailRequest,canvas=$('detail-chart');
+  const trade=renderTradeControls();
   $('detail-timeframe-label').textContent=`PAIR DETAIL / ${interval==='1M'?'1M':interval.toUpperCase()} CHART`;
   $('detail-stats').textContent=`Loading ${CHART_LABELS[interval]} candles…`;
   $('detail-indicators').textContent='Loading indicator calculations…';
   $('detail-explanation').textContent='';canvas.getContext('2d').clearRect(0,0,canvas.width,canvas.height);
   try{
-    const bars=await loadDisplayBars(symbol,interval,force);
+    const bars=interval==='1m'&&trade&&tradeWindow!=='latest'?await loadTradeMinuteBars(symbol,trade,tradeWindow,force):await loadDisplayBars(symbol,interval,force);
     if(requestId!==detailRequest||$('detail').hidden)return;
     const a=scores.get(symbol),m=bySymbol.get(symbol),tech=indicators(bars),bb=tech.bollinger;
-    drawCandles(canvas,bars,interval==='1h'?a?.resistance:null,true);canvas.dataset.interval=interval;
+    drawCandles(canvas,bars,interval==='1h'?a?.resistance:null,true,interval==='1m'?trade:null);canvas.dataset.interval=interval;
     canvas.dataset.lastUpdate=String(Date.now());
+    $('detail-chart-note').textContent=interval==='1m'&&trade?`Showing ${tradeWindow==='entry'?'entry':tradeWindow==='exit'?'exit':'latest'} minute window · ${timeUTC(bars[0].time)} to ${timeUTC(bars.at(-1).closeTime)}. Lines are simulated trigger/fill levels; markers use stored paper-trade timestamps. Candles do not prove tick-accurate execution.`:'Trade markers appear on 1m charts only when a paper trade has actually been recorded.';
     $('detail-stats').innerHTML=`<span>CHART <b>${escape(CHART_LABELS[interval])} candles</b></span><span>AVAILABLE <b>${bars.length} bars</b></span><span>LAST CHART CLOSE <b>${num(bars.at(-1)?.close,6)}</b> USDT</span><span>24H MARKET <b>${pct(m?.change)}</b></span><span>1H RESISTANCE <b>${num(a?.resistance,6)}</b></span><span>RESISTANCE DISTANCE <b>${a?num(a.distancePct,2)+'%':'—'}</b></span>`;
     const items=[['RSI (14)',num(tech.rsi14,1)],['MACD HIST',num(tech.macd.histogram,6)],['EMA (9)',num(tech.ema9,6)],['EMA (21)',num(tech.ema21,6)],['EMA (50)',num(tech.ema50,6)],['BB WIDTH (20,2)',num(bb.widthPct,2)+'%'],['ATR (14)',num(tech.atrPct,2)+'%'],['1H VOLUME / AVG',a?num(a.volumeRatio,2)+'×':'—'],['1H VS BTC',a?pct(a.relative):'—'],['1H READINESS',a?String(a.readinessScore)+'/100':'—']];
     $('detail-indicators').innerHTML=items.map(([label,value])=>`<div class="detail-indicator"><span>${escape(label)}</span><strong>${escape(value)}</strong></div>`).join('');
@@ -197,7 +273,7 @@ async function updateDetail(force=false){
 function paperUI(){const n=$('paper-notice');n.classList.toggle('active',armed);n.textContent=armed?'ARMED · Virtual long trades may open after a fresh, confirmed hourly signal. Scanning and exits only work while this browser tab is running.':'PAUSED · No new positions will open. The simulator runs only while this page is open. Existing paper positions are checked when market data are available.';$('paper-toggle').textContent=armed?'Pause new trades':'Start paper engine';
   $('portfolios').innerHTML=STRATEGIES.map(s=>{const p=paper.portfolios[s.id],st=portfolioStats(p,Object.fromEntries(markets.map(m=>[m.symbol,m.price])),paper.config);return `<div class="portfolio"><h3>${escape(s.name)}</h3><div class="fine">STARTED $${num(paper.config.startingCash,0)} · ${st.openCount} OPEN</div><div class="net ${st.realised>0?'pos':st.realised<0?'neg':''}">${cash(st.realised)}</div><div class="fine">REALIZED NET P&amp;L<br>${st.trades} CLOSED TRADES · WIN RATE ${st.winRate===null?'—':num(st.winRate,1)+'%'}<br>EST. EQUITY ${cash(st.estimatedEquity)}</div></div>`;}).join('');
   const trades=STRATEGIES.flatMap(s=>{const p=paper.portfolios[s.id];return [...p.trades.map(t=>({...t,status:t.reason,ts:t.exitTime})),...p.positions.map(t=>({...t,status:'OPEN'+(t.dataGap?' / DATA GAP':''),ts:t.entryTime,pnl:null}))];}).sort((a,b)=>b.ts-a.ts).slice(0,100);
-  $('ledger').innerHTML=trades.length?trades.map(t=>`<tr><td>${new Date(t.entryTime).toISOString().slice(0,16).replace('T',' ')}</td><td>${escape(STRATEGIES.find(x=>x.id===t.strategyId)?.name||'')}</td><td>${escape(t.symbol)}</td><td>${num(t.entryPrice,6)}</td><td>${t.exitPrice?num(t.exitPrice,6):'—'}</td><td class="${t.pnl===null?'':t.pnl>=0?'profit':'loss'}">${t.pnl===null?'—':cash(t.pnl)}</td><td>${escape(t.status)}</td></tr>`).join(''):'<tr><td colspan="7">No trades yet. A blank ledger is not a profitable result.</td></tr>';
+  $('ledger').innerHTML=trades.length?trades.map(t=>`<tr class="trade-ledger-row" data-symbol="${escape(t.symbol)}" data-trade="${escape(tradeKey(t))}" tabindex="0" aria-label="View paper trade for ${escape(t.symbol)} on minute chart"><td>${new Date(t.entryTime).toISOString().slice(0,16).replace('T',' ')}</td><td>${escape(STRATEGIES.find(x=>x.id===t.strategyId)?.name||'')}</td><td>${escape(t.symbol)}</td><td>${num(t.entryPrice,6)}</td><td>${t.exitPrice?num(t.exitPrice,6):'—'}</td><td class="${t.pnl===null?'':t.pnl>=0?'profit':'loss'}">${t.pnl===null?'—':cash(t.pnl)}</td><td>${escape(t.status)}</td></tr>`).join(''):'<tr><td colspan="7">No trades yet. A blank ledger is not a profitable result.</td></tr>';
 }
 async function bookAsk(symbol){const d=await json(`ticker/bookTicker?symbol=${encodeURIComponent(symbol)}`);const ask=+d.askPrice,bid=+d.bidPrice;return Number.isFinite(ask)&&Number.isFinite(bid)&&ask>0&&bid>0&&ask>=bid?ask:null;}
 async function managePositions(){const positions=STRATEGIES.flatMap(s=>paper.portfolios[s.id].positions);if(!positions.length)return;
@@ -244,8 +320,13 @@ function init(){
   $('detail-timeframes').addEventListener('click',e=>{const button=e.target.closest('button[data-interval]');if(!button||!Object.hasOwn(CHART_LABELS,button.dataset.interval))return;
     detailInterval=button.dataset.interval;selectInterval('detail-timeframes',detailInterval);updateDetail();
   });
+  $('detail-trade-select').addEventListener('change',e=>{selectedTradeKey=e.target.value;tradeWindow='entry';updateDetail();});
+  $('detail-trade-windows').addEventListener('click',e=>{const button=e.target.closest('button[data-window]');if(!button||button.disabled)return;tradeWindow=button.dataset.window;updateDetail(true);});
+  $('detail-paper-hint').addEventListener('click',()=>{if(detailInterval!=='1m'&&activeTrade()){detailInterval='1m';tradeWindow='entry';selectInterval('detail-timeframes',detailInterval);updateDetail();}});
+  $('ledger').addEventListener('click',e=>{const row=e.target.closest('tr[data-trade]');if(row)detail(row.dataset.symbol,row.dataset.trade);});
+  $('ledger').addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){const row=e.target.closest('tr[data-trade]');if(row){e.preventDefault();detail(row.dataset.symbol,row.dataset.trade);}}});
   $('paper-toggle').addEventListener('click',()=>{armed=!armed;localStorage.setItem('breakout-armed',armed?'yes':'no');paperUI();if(armed&&ready)enterSignals();});
-  $('export').addEventListener('click',downloadCSV);$('reset').addEventListener('click',()=>{if(confirm('Erase all four local virtual portfolios and their trade history? This cannot be undone.')){paper=createState();save();paperUI();}});
+  $('export').addEventListener('click',downloadCSV);$('reset').addEventListener('click',()=>{if(confirm('Erase all four local virtual portfolios and their trade history? This cannot be undone.')){paper=createState();selectedTradeKey=null;save();paperUI();if(!$('detail').hidden)updateDetail();}});
   $('close-detail').addEventListener('click',()=>{$('detail').hidden=true;detailRequest++;});$('detail').querySelector('[data-close]').addEventListener('click',()=>{$('detail').hidden=true;detailRequest++;});document.addEventListener('keydown',e=>{if(e.key==='Escape'){$('detail').hidden=true;detailRequest++;}});
   const clock=()=>{$('clock').textContent=new Date().toISOString().slice(11,19)+' UTC';};clock();setInterval(clock,1000);
   paperUI();scan();setInterval(()=>{if(!document.hidden)scan();},SCAN_EVERY_MS);setInterval(()=>{if(!document.hidden&&!busy)managePositions();},60000);
