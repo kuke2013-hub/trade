@@ -106,6 +106,15 @@ try{
   let state=await page.evaluate(()=>JSON.parse(localStorage.getItem('breakout-paper-v1')));
   assert.equal(state.portfolios.breakout.positions[0].symbol,'MOMUSDT');
   assert.ok(state.portfolios.breakout.positions[0].entryFee>0);
+  // A single market signal can trigger several *independent* model portfolios,
+  // but the human-facing ledger must show one grouped market-event row.
+  const modelEntries=['breakout','volume','compression','strength'].filter(id=>
+    state.portfolios[id].positions.some(t=>t.symbol==='MOMUSDT'));
+  assert.ok(modelEntries.length>=2,'Fixture must demonstrate multi-model signal overlap');
+  assert.equal(await page.locator('#ledger tr[data-symbol="MOMUSDT"]').count(),1,'Overlapping strategies should show one grouped ledger row');
+  const groupedText=await page.locator('#ledger tr[data-symbol="MOMUSDT"]').innerText();
+  assert.match(groupedText,new RegExp(`${modelEntries.length} models`),'Ledger explains how many virtual models traded this event');
+  assert.match(await page.locator('.ledger-disclosure').innerText(),/separate virtual positions/i,'Disclose distinct model portfolios and aggregate P&L');
   const card=page.locator('.coin-card[data-symbol="MOMUSDT"]');
   await card.click();assert.equal(await page.locator('#detail-symbol').innerText(),'MOMUSDT');
   assert.equal(await page.locator('#detail-timeframes button.active').getAttribute('data-interval'),'1m','Recorded paper entry opens the precise 1m chart');

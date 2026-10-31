@@ -85,3 +85,8 @@ The top **Potential and confirmed breakouts** section now combines two distinct 
 ## Visual theme
 
 The site uses a Matrix-inspired terminal look: neon-green phosphor typography, monospaced fonts (with local fallbacks), nearly black panels and a low-opacity CRT scanline overlay. This is purely CSS and HTML presentation; it does not affect scanner refresh, market analysis, trade execution, localStorage, chart candles or historical markers. Confirmed entry signals retain their double red outline and approaching resistance retains its single red outline. Reduced-motion preferences are respected.
+
+
+## Grouped paper-trade ledger
+
+The ledger displays **one market event per symbol and closed hourly signal candle**, even when several independent research algorithms all opened positions on that event. For example, resistance, volume and relative-strength models can simultaneously buy the same symbol in *three separate $10,000 virtual portfolios*. The ledger groups these for readability, lists the participating models, and explicitly labels combined realised P&L across the model portfolios. **This is a presentation-only change:** it does not prevent or merge underlying independent model orders. Each portfolio still tracks its own $200 positions, costs, fees, exits and results; CSV continues to export every individual model trade. Clicking the grouped row opens the existing trade chart where individual strategy positions remain selectable. The grouping keys use an exact symbol and `signalBar`, rather than merely matching symbol or entry date, so distinct breakout events remain separate. Trades lacking a known signal candle are deliberately not grouped. Do not treat correlated model profits from the same underlying event as independent evidence of edge.

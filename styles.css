@@ -313,3 +313,9 @@ footer {border-top-color:#265335;color:var(--sub)}
 @media(max-width:1060px){.hero::before{display:none}}
 @media(max-width:700px){.hero h1{font-size:clamp(32px,8.5vw,48px)}.sidebar::before{display:none}.hero{padding-top:8px}.section-header h2{font-size:20px}}
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}body::after{opacity:.15}}
+
+/* Consolidated research-ledger display; portfolios and trade accounting are unchanged. */
+.ledger-disclosure{max-width:940px;margin:-1px 0 16px;color:var(--sub);font-size:11px;line-height:1.7}
+.ledger-note-title{font-size:10px;color:var(--faint);letter-spacing:.08em}
+.bundle-count{font-size:11px;color:var(--text);font-weight:700}
+.bundle-detail{display:block;font-size:10px;color:var(--faint);margin-top:5px;line-height:1.55;white-space:normal}

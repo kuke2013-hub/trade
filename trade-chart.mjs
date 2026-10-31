@@ -55,3 +55,40 @@ export function minuteMarkerPosition(candles, timestamp, left=10, right=1090) {
   const fraction=Math.max(0,Math.min(1,(timestamp-candle.time)/(candle.closeTime+1-candle.time)));
   return left+(index+fraction)*(right-left)/candles.length;
 }
+
+
+// Consolidate a shared market signal into one *display row* without merging
+// independent strategy portfolios or changing their cash, fills or records.
+// signalBar is the actual closed hourly candle that generated the trade.
+export function groupPaperEvents(trades) {
+  if (!Array.isArray(trades)) return [];
+  const groups=new Map();
+  for (const trade of trades) {
+    if (!trade || typeof trade.symbol!=='string' || !Number.isFinite(trade.entryTime)) continue;
+    // Missing signalBar means we cannot safely establish a common event.
+    const eventKey=Number.isFinite(trade.signalBar)
+      ? `${trade.symbol}|${trade.signalBar}`
+      : `${trade.symbol}|individual|${trade.strategyId}|${trade.entryTime}`;
+    if (!groups.has(eventKey)) groups.set(eventKey,{key:eventKey,symbol:trade.symbol,trades:[]});
+    groups.get(eventKey).trades.push(trade);
+  }
+  return [...groups.values()].map(group=>{
+    const list=group.trades;
+    const closed=list.filter(t=>Number.isFinite(t.exitTime));
+    const open=list.length-closed.length;
+    const realisedPnl=closed.reduce((sum,t)=>sum+(Number.isFinite(t.pnl)?t.pnl:0),0);
+    const samePrice=(key,arr)=>arr.length&&arr.every(t=>Number.isFinite(t[key])&&t[key]===arr[0][key])?arr[0][key]:null;
+    const statuses=[...new Set(closed.map(t=>t.reason||t.status||'closed'))];
+    const status=open===list.length?'OPEN':open>0?'MIXED':statuses.length===1?statuses[0]:'MIXED EXITS';
+    return {...group,
+      representative:list[0],
+      strategyIds:[...new Set(list.map(t=>t.strategyId))],
+      entryTime:Math.min(...list.map(t=>t.entryTime)),
+      updatedAt:Math.max(...list.map(t=>Number.isFinite(t.exitTime)?t.exitTime:t.entryTime)),
+      entryPrice:samePrice('entryPrice',list),
+      exitPrice:closed.length===list.length?samePrice('exitPrice',closed):null,
+      openCount:open,closedCount:closed.length,realisedPnl:closed.length?realisedPnl:null,status,
+      allocation:list.reduce((sum,t)=>sum+(Number.isFinite(t.cost)?t.cost:0),0),
+    };
+  }).sort((a,b)=>b.updatedAt-a.updatedAt||a.key.localeCompare(b.key));
+}

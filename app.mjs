@@ -1,5 +1,5 @@
 import {STRATEGIES,DEFAULT_CONFIG,parseKlines,analyse,hourlyCacheCurrent,withLiveReadiness,createState,openPaper,closePaper,evaluateExit,portfolioStats,indicators,emaSeries} from './engine.mjs';
-import {tradeKey,recordedTrades,tradeLevels,tradeMinuteWindow,minuteMarkerPosition} from './trade-chart.mjs';
+import {tradeKey,recordedTrades,tradeLevels,tradeMinuteWindow,minuteMarkerPosition,groupPaperEvents} from './trade-chart.mjs';
 const API='https://data-api.binance.vision/api/v3/';
 // Display-only candle intervals. Strategy signals and trade entries continue to use completed 1h bars.
 const CHART_LABELS=Object.freeze({'1M':'1 month','1w':'1 week','1d':'1 day','1h':'1 hour','5m':'5 minutes','3m':'3 minutes','1m':'1 minute'});
@@ -272,8 +272,15 @@ async function updateDetail(force=false){
 }
 function paperUI(){const n=$('paper-notice');n.classList.toggle('active',armed);n.textContent=armed?'ARMED · Virtual long trades may open after a fresh, confirmed hourly signal. Scanning and exits only work while this browser tab is running.':'PAUSED · No new positions will open. The simulator runs only while this page is open. Existing paper positions are checked when market data are available.';$('paper-toggle').textContent=armed?'Pause new trades':'Start paper engine';
   $('portfolios').innerHTML=STRATEGIES.map(s=>{const p=paper.portfolios[s.id],st=portfolioStats(p,Object.fromEntries(markets.map(m=>[m.symbol,m.price])),paper.config);return `<div class="portfolio"><h3>${escape(s.name)}</h3><div class="fine">STARTED $${num(paper.config.startingCash,0)} · ${st.openCount} OPEN</div><div class="net ${st.realised>0?'pos':st.realised<0?'neg':''}">${cash(st.realised)}</div><div class="fine">REALIZED NET P&amp;L<br>${st.trades} CLOSED TRADES · WIN RATE ${st.winRate===null?'—':num(st.winRate,1)+'%'}<br>EST. EQUITY ${cash(st.estimatedEquity)}</div></div>`;}).join('');
-  const trades=STRATEGIES.flatMap(s=>{const p=paper.portfolios[s.id];return [...p.trades.map(t=>({...t,status:t.reason,ts:t.exitTime})),...p.positions.map(t=>({...t,status:'OPEN'+(t.dataGap?' / DATA GAP':''),ts:t.entryTime,pnl:null}))];}).sort((a,b)=>b.ts-a.ts).slice(0,100);
-  $('ledger').innerHTML=trades.length?trades.map(t=>`<tr class="trade-ledger-row" data-symbol="${escape(t.symbol)}" data-trade="${escape(tradeKey(t))}" tabindex="0" aria-label="View paper trade for ${escape(t.symbol)} on minute chart"><td>${new Date(t.entryTime).toISOString().slice(0,16).replace('T',' ')}</td><td>${escape(STRATEGIES.find(x=>x.id===t.strategyId)?.name||'')}</td><td>${escape(t.symbol)}</td><td>${num(t.entryPrice,6)}</td><td>${t.exitPrice?num(t.exitPrice,6):'—'}</td><td class="${t.pnl===null?'':t.pnl>=0?'profit':'loss'}">${t.pnl===null?'—':cash(t.pnl)}</td><td>${escape(t.status)}</td></tr>`).join(''):'<tr><td colspan="7">No trades yet. A blank ledger is not a profitable result.</td></tr>';
+  const raw=STRATEGIES.flatMap(s=>{const p=paper.portfolios[s.id];return [...p.trades,...p.positions];});
+  const events=groupPaperEvents(raw).slice(0,100);
+  $('ledger').innerHTML=events.length?events.map(g=>{
+    const nameList=g.strategyIds.map(id=>STRATEGIES.find(s=>s.id===id)?.name||id).join(' · ');
+    const plurality=g.trades.length===1?'model':'models';
+    const pnlLabel=g.realisedPnl===null?'—':cash(g.realisedPnl);
+    const details=g.closedCount?`${g.closedCount} closed${g.openCount?' · '+g.openCount+' open':''}`:`${g.openCount} open`;
+    return `<tr class="trade-ledger-row" data-symbol="${escape(g.symbol)}" data-trade="${escape(tradeKey(g.representative))}" tabindex="0" aria-label="View ${escape(g.symbol)} paper positions across ${g.trades.length} ${plurality} on minute chart"><td>${new Date(g.entryTime).toISOString().slice(0,16).replace('T',' ')}</td><td><strong class="bundle-count">${g.trades.length} ${plurality}</strong><span class="bundle-detail">${escape(nameList)}</span></td><td>${escape(g.symbol)}</td><td>${g.entryPrice===null?'VARIES':num(g.entryPrice,6)}</td><td>${g.exitPrice===null?'—':num(g.exitPrice,6)}</td><td class="${g.realisedPnl===null?'':g.realisedPnl>=0?'profit':'loss'}">${pnlLabel}<span class="bundle-detail">${g.closedCount?`across ${g.closedCount} virtual portfolios`:''}</span></td><td>${escape(g.status)}<span class="bundle-detail">${escape(details)}</span></td></tr>`;
+  }).join(''):'<tr><td colspan="7">No trades yet. A blank ledger is not a profitable result.</td></tr>';
 }
 async function bookAsk(symbol){const d=await json(`ticker/bookTicker?symbol=${encodeURIComponent(symbol)}`);const ask=+d.askPrice,bid=+d.bidPrice;return Number.isFinite(ask)&&Number.isFinite(bid)&&ask>0&&bid>0&&ask>=bid?ask:null;}
 async function managePositions(){const positions=STRATEGIES.flatMap(s=>paper.portfolios[s.id].positions);if(!positions.length)return;
