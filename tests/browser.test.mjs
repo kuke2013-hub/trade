@@ -65,7 +65,14 @@ try{
   assert.ok(+(await page.locator('#metric-near').innerText())>=1,'Expected pre-breakout candidates');
   assert.equal(await page.locator('.coin-card').first().getAttribute('data-symbol'),'NEARUSDT','Approaching resistance must sort before already confirmed breakouts');
   assert.equal(await page.locator('.coin-card[data-symbol="NEARUSDT"] .card-stage').innerText(),'APPROACHING');
-  assert.ok((await page.locator('#approaching .signal-tile').count())>=1);
+  assert.ok((await page.locator('#approaching .signal-tile').count())>=2,'Expected merged confirmed and approaching tiles');
+  assert.equal(await page.locator('#approaching .signal-tile').first().getAttribute('data-symbol'),'MOMUSDT','Confirmed breakout must be pinned first');
+  assert.equal(await page.locator('#approaching .signal-tile').nth(1).getAttribute('data-symbol'),'NEARUSDT','Approaching candidate must follow confirmed breakout');
+  assert.equal(await page.locator('#approaching .breakout-tile').count(),1,'Confirmed breakouts must use red-highlight class');
+  assert.equal(await page.locator('#approaching .near-tile').count(),1,'Approaching candidates retain normal styling');
+  assert.match(await page.locator('#approaching .breakout-tile .tile-label').innerText(),/CONFIRMED BREAKOUT/);
+  assert.equal(await page.locator('#approaching .breakout-tile').evaluate(el=>getComputedStyle(el).animationName),'breakoutPulse','Confirmed breakout must gently pulse');
+  assert.equal(await page.locator('section.signal-panel[hidden]').count(),1,'Obsolete standalone section must be hidden');
   assert.ok((await page.locator('.coin-card[data-symbol="NEARUSDT"] .indicator-meter').count())===3);
   assert.equal(pageErrors.length,0,'No runtime exceptions: '+pageErrors.join(' | '));
   await page.locator('#paper-toggle').click();
