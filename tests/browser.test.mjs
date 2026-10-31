@@ -110,6 +110,7 @@ try{
   assert.equal(tickerCalls,beforeTickers+1,'Refresh must request a new ticker snapshot');
   assert.equal(exchangeCalls,1,'Static exchange metadata should be reused within one hour');
   assert.equal(hourlyCalls,beforeHourly,'Unchanged 1h candle histories should remain cached');
+  await page.waitForFunction(()=>document.querySelector('#scan-status')?.textContent.includes('live rankings ~1 min'),{timeout:30000});
   assert.match(await page.locator('#scan-status').innerText(),/live rankings ~1 min/);
   await page.screenshot({path:'dashboard-smoke.png'});
   console.log(`UI INTEGRATION PASSED: ${pairs} pairs, ${analysed} analysed, ${signals} signal(s), all seven chart intervals, approaching-resistance rank and technical indicators, paper entry, filter/detail operational.`);
