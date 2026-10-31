@@ -72,32 +72,35 @@ try{
   assert.ok(analysed>=50,`Expected research sample; got ${analysed}`);
   assert.ok(signals>=1,'Expected fixture breakout signal');
   assert.ok((await page.locator('.coin-card').count())>=200,'Expected cards');
-  // Visual-only Matrix theme: preserve the existing red breakout risk semantics.
-  const matrixTheme=await page.evaluate(()=>({
+  // Monochrome terminal theme: red is reserved for an ACTUAL open paper position,
+  // never an approaching or confirmed signal that did not result in a recorded BUY.
+  const theme=await page.evaluate(()=>({
     font:getComputedStyle(document.documentElement).fontFamily,
     bg:getComputedStyle(document.documentElement).getPropertyValue('--bg').trim(),
-    glow:getComputedStyle(document.querySelector('.brand strong')).textShadow,
     nearColor:getComputedStyle(document.querySelector('.near-tile')).borderTopColor,
     confirmedColor:getComputedStyle(document.querySelector('.breakout-tile')).outlineColor,
+    baseFont:getComputedStyle(document.body).fontSize,
   }));
-  assert.match(matrixTheme.font,/Share Tech Mono/,'Terminal typography must be enabled');
-  assert.equal(matrixTheme.bg,'#020704','Dark Matrix palette must be active');
-  assert.notEqual(matrixTheme.glow,'none','Header text has subtle phosphor glow');
-  assert.match(matrixTheme.nearColor,/rgb\(243, 104, 125\)/,'Near-breakout alerts remain red');
-
+  assert.match(theme.font,/Share Tech Mono/,'Terminal font must remain enabled');
+  assert.equal(theme.bg,'#090909','Monochrome palette must be active');
+  assert.match(theme.nearColor,/rgb\((\d+), \1, \1\)/,'Near-resistance border should be neutral grey');
+  assert.match(theme.confirmedColor,/rgb\((\d+), \1, \1\)/,'Untraded breakout signal should remain grey');
+  assert.ok(parseFloat(theme.baseFont)>=15.3,'Text should be about 10% larger than original');
+  assert.equal(await page.locator('.signal-tile.live-position').count(),0,'No open positions before the engine is armed');
+  assert.equal((await page.locator('#paper-total-net').innerText()).trim(),'$0.00','Initial combined paper P&L is zero');
   assert.ok(+(await page.locator('#metric-near').innerText())>=1,'Expected pre-breakout candidates');
   assert.equal(await page.locator('.coin-card').first().getAttribute('data-symbol'),'NEARUSDT','Approaching resistance must sort before already confirmed breakouts');
   assert.equal(await page.locator('.coin-card[data-symbol="NEARUSDT"] .card-stage').innerText(),'APPROACHING');
   assert.ok((await page.locator('#approaching .signal-tile').count())>=2,'Expected merged confirmed and approaching tiles');
   assert.equal(await page.locator('#approaching .signal-tile').first().getAttribute('data-symbol'),'MOMUSDT','Confirmed breakout must be pinned first');
   assert.equal(await page.locator('#approaching .signal-tile').nth(1).getAttribute('data-symbol'),'NEARUSDT','Approaching candidate must follow confirmed breakout');
-  assert.equal(await page.locator('#approaching .breakout-tile').count(),1,'Confirmed breakouts must use red-highlight class');
+  assert.equal(await page.locator('#approaching .breakout-tile').count(),1,'Confirmed signals preserve the breakout label class');
   assert.equal(await page.locator('#approaching .near-tile').count(),1,'Approaching candidate remains visible behind confirmed');
-  assert.ok(Number.parseFloat(await page.locator('#approaching .near-tile').evaluate(el=>getComputedStyle(el).borderTopWidth))>=1,'Approaching candidates have a visible single red border');
-  assert.equal(await page.locator('#approaching .breakout-tile').evaluate(el=>getComputedStyle(el).outlineStyle),'solid','Confirmed breakout has a second outline');
-  assert.ok(Number.parseFloat(await page.locator('#approaching .breakout-tile').evaluate(el=>getComputedStyle(el).outlineWidth))>=2,'Confirmed breakout has a 2px second red outline');
+  assert.ok(Number.parseFloat(await page.locator('#approaching .near-tile').evaluate(el=>getComputedStyle(el).borderTopWidth))>=1,'Approaching candidates have a visible neutral border');
+  assert.equal(await page.locator('#approaching .breakout-tile').evaluate(el=>getComputedStyle(el).outlineStyle),'solid','Confirmed signal has a second neutral outline');
+  assert.ok(Number.parseFloat(await page.locator('#approaching .breakout-tile').evaluate(el=>getComputedStyle(el).outlineWidth))>=2,'Confirmed signal has a 2px second neutral outline');
   assert.match(await page.locator('#approaching .breakout-tile .tile-label').innerText(),/CONFIRMED BREAKOUT/);
-  assert.equal(await page.locator('#approaching .breakout-tile').evaluate(el=>getComputedStyle(el).animationName),'confirmedDoublePulse','Confirmed breakout must gently pulse with its double outline');
+  assert.equal(await page.locator('#approaching .breakout-tile').evaluate(el=>getComputedStyle(el).animationName),'none','Only OPEN paper trades may pulse in red');
   assert.equal(await page.locator('section.signal-panel[hidden]').count(),1,'Obsolete standalone section must be hidden');
   assert.ok((await page.locator('.coin-card[data-symbol="NEARUSDT"] .indicator-meter').count())===3);
   assert.equal(pageErrors.length,0,'No runtime exceptions: '+pageErrors.join(' | '));
@@ -106,6 +109,16 @@ try{
   let state=await page.evaluate(()=>JSON.parse(localStorage.getItem('breakout-paper-v1')));
   assert.equal(state.portfolios.breakout.positions[0].symbol,'MOMUSDT');
   assert.ok(state.portfolios.breakout.positions[0].entryFee>0);
+  await page.waitForFunction(()=>document.querySelector('.breakout-tile.live-position')&&document.querySelector('.coin-card[data-symbol="MOMUSDT"].live-position'),{timeout:5000});
+  const liveStyle=await page.locator('.breakout-tile.live-position').evaluate(el=>({border:getComputedStyle(el).borderTopColor,animation:getComputedStyle(el).animationName}));
+  assert.match(liveStyle.border,/rgb\(238, 91, 108\)/,'An actual OPEN paper trade gets a red outline');
+  assert.equal(liveStyle.animation,'livePaperPulse','Only live paper positions get a red pulse');
+  assert.equal(await page.locator('.near-tile.live-position').count(),0,'Approaching candidate must not be highlighted as an active trade');
+  assert.match(await page.locator('#paper-total-realised').innerText(),/\$0\.00/,'No realised profit before any position closes');
+  const openingEstimate=await page.locator('#paper-total-net').innerText();
+  assert.ok(openingEstimate.includes('$')&&!openingEstimate.includes('—'),'Available price marks support an estimated combined net figure');
+  assert.match(await page.locator('#paper-summary-caption').innerText(),/independent model accounts/,'Totals disclose independent strategy accounting');
+
   // A single market signal can trigger several *independent* model portfolios,
   // but the human-facing ledger must show one grouped market-event row.
   const modelEntries=['breakout','volume','compression','strength'].filter(id=>

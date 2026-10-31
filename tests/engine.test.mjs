@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {analyse,parseKlines,createState,openPaper,closePaper,evaluateExit,portfolioStats,fillBuy,sellProceeds,ema,atr} from '../engine.mjs';
+import {analyse,parseKlines,createState,openPaper,closePaper,evaluateExit,portfolioStats,paperPerformance,fillBuy,sellProceeds,ema,atr} from '../engine.mjs';
 const HOUR=3600000;
 function series({breakout=true,volume=200,compression=false}={}) {
   let t=Date.UTC(2026,8,1);
@@ -141,4 +141,27 @@ test('live price re-ranks pre-breakouts without creating or changing a closed ho
   assert.equal(near.lastBarTime,base.lastBarTime);
   assert.deepEqual(near.trigger,base.trigger);
   assert.deepEqual(far.trigger,base.trigger);
+});
+
+test('combined paper P&L sums independent portfolios once and does not double-count grouped events',()=>{
+  const state=createState();
+  assert.deepEqual(paperPerformance(state),{realised:0,openEstimate:0,estimatedNet:0,openCount:0,closedCount:0,missingMarks:0,initial:40000});
+  const at=Date.UTC(2026,9,31,22),signal=at-3600000;
+  for(const strategy of ['breakout','volume','strength'])assert.equal(openPaper(state,strategy,'LAUSDT',0.058829,signal,at),true);
+  const pending=paperPerformance(state,{});
+  assert.equal(pending.openCount,3);
+  assert.equal(pending.estimatedNet,null);
+  assert.equal(pending.openEstimate,null);
+  assert.equal(pending.missingMarks,3);
+  const marked=paperPerformance(state,{LAUSDT:0.0593});
+  assert.ok(Number.isFinite(marked.estimatedNet));
+  assert.equal(marked.openCount,3);
+  assert.equal(marked.missingMarks,0);
+  for(const strategy of ['breakout','volume','strength'])closePaper(state,strategy,'LAUSDT',0.06005,'target',at+3600000);
+  const finished=paperPerformance(state,{});
+  const fromLedger=['breakout','volume','strength'].reduce((sum,id)=>sum+state.portfolios[id].trades[0].pnl,0);
+  assert.ok(Math.abs(finished.realised-fromLedger)<1e-7);
+  assert.ok(Math.abs(finished.estimatedNet-fromLedger)<1e-7);
+  assert.equal(finished.openCount,0);
+  assert.equal(finished.closedCount,3);
 });

@@ -1,4 +1,4 @@
-import {STRATEGIES,DEFAULT_CONFIG,parseKlines,analyse,hourlyCacheCurrent,withLiveReadiness,createState,openPaper,closePaper,evaluateExit,portfolioStats,indicators,emaSeries} from './engine.mjs';
+import {STRATEGIES,DEFAULT_CONFIG,parseKlines,analyse,hourlyCacheCurrent,withLiveReadiness,createState,openPaper,closePaper,evaluateExit,portfolioStats,paperPerformance,indicators,emaSeries} from './engine.mjs';
 import {tradeKey,recordedTrades,tradeLevels,tradeMinuteWindow,minuteMarkerPosition,groupPaperEvents} from './trade-chart.mjs';
 const API='https://data-api.binance.vision/api/v3/';
 // Display-only candle intervals. Strategy signals and trade entries continue to use completed 1h bars.
@@ -64,7 +64,7 @@ function selectInterval(container,interval){
     b.classList.toggle('active',active);b.setAttribute('aria-pressed',String(active));
   });
 }
-function drawChartError(canvas,message){const ctx=canvas.getContext('2d');ctx.clearRect(0,0,canvas.width,canvas.height);ctx.fillStyle='#98a4b7';ctx.font='18px sans-serif';ctx.fillText(message,18,Math.round(canvas.height*.5));}
+function drawChartError(canvas,message){const ctx=canvas.getContext('2d');ctx.clearRect(0,0,canvas.width,canvas.height);ctx.fillStyle='#bfbfbf';ctx.font='20px monospace';ctx.fillText(message,18,Math.round(canvas.height*.5));}
 
 const $=id=>document.getElementById(id);
 const quote=s=>String(s).replace(/USDT$/,'');
@@ -180,33 +180,34 @@ function drawCandles(canvas,bars,resistance=null,overlays=false,trade=null){
   const low=minPrice-padding,high=maxPrice+padding,span=Math.max(high-low,low*.00001);
   const top=H*.07,bottom=H*.77,left=10,right=W-10;
   const yy=p=>bottom-(p-low)/span*(bottom-top),step=(right-left)/data.length;
-  context.strokeStyle='#293645';context.lineWidth=1;for(let i=0;i<4;i++){const y=top+(bottom-top)*i/3;context.beginPath();context.moveTo(left,y);context.lineTo(right,y);context.stroke();}
-  if(Number.isFinite(resistance)&&resistance>=low&&resistance<=high){context.setLineDash([9,7]);context.strokeStyle='#b49b72';context.beginPath();context.moveTo(left,yy(resistance));context.lineTo(right,yy(resistance));context.stroke();context.setLineDash([]);}
+  context.strokeStyle='#343434';context.lineWidth=1;for(let i=0;i<4;i++){const y=top+(bottom-top)*i/3;context.beginPath();context.moveTo(left,y);context.lineTo(right,y);context.stroke();}
+  if(Number.isFinite(resistance)&&resistance>=low&&resistance<=high){context.setLineDash([9,7]);context.strokeStyle='#929292';context.beginPath();context.moveTo(left,yy(resistance));context.lineTo(right,yy(resistance));context.stroke();context.setLineDash([]);}
   const vm=Math.max(1,...data.map(c=>c.volume));
-  data.forEach((c,i)=>{const x=left+step*(i+.5),up=c.close>=c.open,color=up?'#3ee1a2':'#fa7180';context.strokeStyle=color;context.fillStyle=color;context.lineWidth=Math.max(1.5,step*.17);context.beginPath();context.moveTo(x,yy(c.high));context.lineTo(x,yy(c.low));context.stroke();const ya=yy(Math.max(c.open,c.close)),yb=yy(Math.min(c.open,c.close));context.fillRect(x-step*.27,ya,Math.max(2,step*.54),Math.max(2,yb-ya));context.globalAlpha=.3;context.fillRect(x-step*.27,H*.98-(c.volume/vm)*H*.15,Math.max(2,step*.54),(c.volume/vm)*H*.15);context.globalAlpha=1;});
+  data.forEach((c,i)=>{const x=left+step*(i+.5),up=c.close>=c.open,color=up?'#d5d5d5':'#777777';context.strokeStyle=color;context.fillStyle=color;context.lineWidth=Math.max(1.5,step*.17);context.beginPath();context.moveTo(x,yy(c.high));context.lineTo(x,yy(c.low));context.stroke();const ya=yy(Math.max(c.open,c.close)),yb=yy(Math.min(c.open,c.close));context.fillRect(x-step*.27,ya,Math.max(2,step*.54),Math.max(2,yb-ya));context.globalAlpha=.3;context.fillRect(x-step*.27,H*.98-(c.volume/vm)*H*.15,Math.max(2,step*.54),(c.volume/vm)*H*.15);context.globalAlpha=1;});
   // EMA overlays on the expanded chart; values computed from full series to avoid warm-up bias.
-  if(overlays){const series=[{values:emaSeries(bars.map(c=>c.close),9),color:'#6fe8df'},{values:emaSeries(bars.map(c=>c.close),21),color:'#f6ba72'}];
+  if(overlays){const series=[{values:emaSeries(bars.map(c=>c.close),9),color:'#d0d0d0'},{values:emaSeries(bars.map(c=>c.close),21),color:'#777777'}];
     for(const line of series){context.strokeStyle=line.color;context.lineWidth=2;context.beginPath();let started=false;const offset=bars.length-data.length;
       for(let i=0;i<data.length;i++){const v=line.values[offset+i];if(!Number.isFinite(v)){started=false;continue;}const x=left+step*(i+.5);if(!started){context.moveTo(x,yy(v));started=true;}else context.lineTo(x,yy(v));}context.stroke();}
   }
   if(levels){
     // Draw reference levels even if the matching event timestamp lies outside this window;
     // an entry/sell marker is drawn ONLY when the genuine minute candle contains its timestamp.
+    const isOpen=levels.exitTime===null;
     const horizontals=[
-      {price:levels.entry,label:'ENTRY FILL',color:'#5ee5cc',dash:[]},
-      {price:levels.stopTrigger,label:'STOP TRIGGER',color:'#ff6c80',dash:[8,5]},
-      {price:levels.targetTrigger,label:'SELL TARGET',color:'#f4c16c',dash:[8,5]},
+      {price:levels.entry,label:'ENTRY FILL',color:isOpen?'#f06878':'#cecece',dash:[]},
+      {price:levels.stopTrigger,label:'STOP TRIGGER',color:'#a5a5a5',dash:[8,5]},
+      {price:levels.targetTrigger,label:'SELL TARGET',color:'#858585',dash:[8,5]},
     ];
-    if(levels.exit!==null&&levels.exitTime!==null)horizontals.push({price:levels.exit,label:'ACTUAL SIM SELL',color:'#b39aff',dash:[3,4]});
+    if(levels.exit!==null&&levels.exitTime!==null)horizontals.push({price:levels.exit,label:'ACTUAL SIM SELL',color:'#e0e0e0',dash:[3,4]});
     horizontals.forEach(({price,label,color,dash},i)=>{
       context.setLineDash(dash);context.strokeStyle=color;context.lineWidth=1.6;
       context.beginPath();context.moveTo(left,yy(price));context.lineTo(right,yy(price));context.stroke();context.setLineDash([]);
-      context.font='bold 10px ui-sans-serif, sans-serif';const width=context.measureText(label).width+13;
-      context.fillStyle='#081019dc';context.fillRect(right-width-1,yy(price)-13,width+4,15);
-      context.font='bold 10px ui-sans-serif, sans-serif';context.fillStyle=color;context.fillText(label,right-width+4,yy(price)-2);
+      context.font='bold 11px monospace';const width=context.measureText(label).width+13;
+      context.fillStyle='#101010dc';context.fillRect(right-width-1,yy(price)-13,width+4,15);
+      context.font='bold 11px monospace';context.fillStyle=color;context.fillText(label,right-width+4,yy(price)-2);
     });
-    const markers=[{time:levels.entryTime,price:levels.entry,label:'BUY',color:'#5ee5cc'}];
-    if(levels.exitTime!==null&&levels.exit!==null)markers.push({time:levels.exitTime,price:levels.exit,label:'SELL',color:'#b39aff'});
+    const markers=[{time:levels.entryTime,price:levels.entry,label:'BUY',color:isOpen?'#f06878':'#cecece'}];
+    if(levels.exitTime!==null&&levels.exit!==null)markers.push({time:levels.exitTime,price:levels.exit,label:'SELL',color:'#e0e0e0'});
     const drawn=[];
     markers.forEach(({time,price,label,color})=>{
       const x=minuteMarkerPosition(data,time,left,right);
@@ -214,8 +215,8 @@ function drawCandles(canvas,bars,resistance=null,overlays=false,trade=null){
       const y=yy(price);context.setLineDash([4,5]);context.strokeStyle=color;context.lineWidth=1.25;
       context.beginPath();context.moveTo(x,top);context.lineTo(x,bottom);context.stroke();context.setLineDash([]);
       context.beginPath();context.arc(x,y,6,0,Math.PI*2);context.fillStyle=color;context.fill();
-      context.strokeStyle='#090d14';context.lineWidth=2;context.stroke();
-      const labelX=Math.min(right-42,Math.max(left+4,x+9));context.font='bold 11px ui-sans-serif, sans-serif';context.fillStyle=color;context.fillText(label,labelX,Math.max(top+13,y-11));
+      context.strokeStyle='#080808';context.lineWidth=2;context.stroke();
+      const labelX=Math.min(right-42,Math.max(left+4,x+9));context.font='bold 12px monospace';context.fillStyle=color;context.fillText(label,labelX,Math.max(top+13,y-11));
       drawn.push(label.toLowerCase());
     });
     canvas.dataset.tradeMarkers=drawn.join(',');
@@ -270,8 +271,22 @@ async function updateDetail(force=false){
     $('detail-explanation').innerHTML=a?`<strong>Hourly classification:</strong> ${escape(stageLabel(a))} · ${num(a.distancePct,2)}% below resistance (negative means above). <strong>Readiness:</strong> ${a.readinessScore}/100 (heuristic, not a probability).<br><strong>Hourly paper-entry triggers:</strong> ${triggers(a).length?triggers(a).map(s=>escape(s.name)).join(', '):'None'} · <strong>Trend:</strong> ${a.trend?'bullish':'not confirmed'}. <strong>Compression:</strong> ${a.compression?'detected':'not detected'}.<br><strong>Overlay:</strong> <span class="ema9-legend">EMA 9</span> and <span class="ema21-legend">EMA 21</span>. RSI, MACD, EMA, Bollinger Bands and ATR are calculated from the selected chart interval, which may include a forming candle; screening and all paper trades still use closed 1H candles.`:'This pair has no completed hourly assessment. The chart indicators are informational, and may include the forming candle.';
   }catch(e){if(requestId===detailRequest&&!$('detail').hidden){$('detail-stats').textContent='Market candles unavailable: '+e.message;$('detail-indicators').textContent='No valid indicator data';drawChartError(canvas,'Chart unavailable');}}
 }
+function syncOpenTradeHighlights(){
+  const held=new Set(STRATEGIES.flatMap(s=>paper.portfolios[s.id].positions.map(p=>p.symbol)));
+  document.querySelectorAll('.signal-tile[data-symbol],.coin-card[data-symbol],.trade-ledger-row[data-symbol]').forEach(el=>{
+    const active=held.has(el.dataset.symbol);
+    el.classList.toggle('live-position',active);
+    if(active)el.setAttribute('data-open-paper','true');else el.removeAttribute('data-open-paper');
+  });
+}
 function paperUI(){const n=$('paper-notice');n.classList.toggle('active',armed);n.textContent=armed?'ARMED · Virtual long trades may open after a fresh, confirmed hourly signal. Scanning and exits only work while this browser tab is running.':'PAUSED · No new positions will open. The simulator runs only while this page is open. Existing paper positions are checked when market data are available.';$('paper-toggle').textContent=armed?'Pause new trades':'Start paper engine';
   $('portfolios').innerHTML=STRATEGIES.map(s=>{const p=paper.portfolios[s.id],st=portfolioStats(p,Object.fromEntries(markets.map(m=>[m.symbol,m.price])),paper.config);return `<div class="portfolio"><h3>${escape(s.name)}</h3><div class="fine">STARTED $${num(paper.config.startingCash,0)} · ${st.openCount} OPEN</div><div class="net ${st.realised>0?'pos':st.realised<0?'neg':''}">${cash(st.realised)}</div><div class="fine">REALIZED NET P&amp;L<br>${st.trades} CLOSED TRADES · WIN RATE ${st.winRate===null?'—':num(st.winRate,1)+'%'}<br>EST. EQUITY ${cash(st.estimatedEquity)}</div></div>`;}).join('');
+  const pnl=paperPerformance(paper,Object.fromEntries(markets.map(m=>[m.symbol,m.price])));
+  $('paper-total-net').textContent=pnl.estimatedNet===null?'—':cash(pnl.estimatedNet);
+  $('paper-total-realised').textContent=cash(pnl.realised);
+  $('paper-total-open').textContent=pnl.openEstimate===null?'—':cash(pnl.openEstimate);
+  $('paper-summary-caption').textContent=pnl.missingMarks?`${pnl.missingMarks} open position(s) lack a current Binance price. Estimated total unavailable; realised profit remains exact within the simulator.`:`${pnl.openCount} open positions · ${pnl.closedCount} closed positions · ${cash(pnl.initial)} initial virtual capital across ${STRATEGIES.length} independent model accounts. Open P&L uses latest available spot prices and estimated exit fees/slippage.`;
+  $('header-paper-pnl').textContent=`PAPER NET ${pnl.estimatedNet===null?'—':cash(pnl.estimatedNet)}`;
   const raw=STRATEGIES.flatMap(s=>{const p=paper.portfolios[s.id];return [...p.trades,...p.positions];});
   const events=groupPaperEvents(raw).slice(0,100);
   $('ledger').innerHTML=events.length?events.map(g=>{
@@ -281,6 +296,7 @@ function paperUI(){const n=$('paper-notice');n.classList.toggle('active',armed);
     const details=g.closedCount?`${g.closedCount} closed${g.openCount?' · '+g.openCount+' open':''}`:`${g.openCount} open`;
     return `<tr class="trade-ledger-row" data-symbol="${escape(g.symbol)}" data-trade="${escape(tradeKey(g.representative))}" tabindex="0" aria-label="View ${escape(g.symbol)} paper positions across ${g.trades.length} ${plurality} on minute chart"><td>${new Date(g.entryTime).toISOString().slice(0,16).replace('T',' ')}</td><td><strong class="bundle-count">${g.trades.length} ${plurality}</strong><span class="bundle-detail">${escape(nameList)}</span></td><td>${escape(g.symbol)}</td><td>${g.entryPrice===null?'VARIES':num(g.entryPrice,6)}</td><td>${g.exitPrice===null?'—':num(g.exitPrice,6)}</td><td class="${g.realisedPnl===null?'':g.realisedPnl>=0?'profit':'loss'}">${pnlLabel}<span class="bundle-detail">${g.closedCount?`across ${g.closedCount} virtual portfolios`:''}</span></td><td>${escape(g.status)}<span class="bundle-detail">${escape(details)}</span></td></tr>`;
   }).join(''):'<tr><td colspan="7">No trades yet. A blank ledger is not a profitable result.</td></tr>';
+  syncOpenTradeHighlights();
 }
 async function bookAsk(symbol){const d=await json(`ticker/bookTicker?symbol=${encodeURIComponent(symbol)}`);const ask=+d.askPrice,bid=+d.bidPrice;return Number.isFinite(ask)&&Number.isFinite(bid)&&ask>0&&bid>0&&ask>=bid?ask:null;}
 async function managePositions(){const positions=STRATEGIES.flatMap(s=>paper.portfolios[s.id].positions);if(!positions.length)return;

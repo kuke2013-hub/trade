@@ -151,3 +151,16 @@ export function portfolioStats(portfolio,marks={},config=DEFAULT_CONFIG){
   const grossLoss=-completed.filter(t=>t.pnl<0).reduce((a,t)=>a+t.pnl,0);
   return {realised,trades:completed.length,wins,winRate:completed.length?100*wins/completed.length:null,profitFactor:grossLoss?grossProfit/grossLoss:null,estimatedEquity:portfolio.cash+openValue,openCount:portfolio.positions.length};
 }
+
+// Portfolio-level paper P&L presentation only. Never merges or duplicates trades.
+// A missing mark on ANY open position makes the estimated fields unavailable.
+export function paperPerformance(state, marks={}){
+  const portfolios=STRATEGIES.map(s=>state.portfolios[s.id]);
+  const initial=STRATEGIES.length*state.config.startingCash;
+  const realised=portfolios.reduce((sum,p)=>sum+p.trades.reduce((v,t)=>v+t.pnl,0),0);
+  const openCount=portfolios.reduce((sum,p)=>sum+p.positions.length,0);
+  const closedCount=portfolios.reduce((sum,p)=>sum+p.trades.length,0);
+  const missingMarks=portfolios.reduce((sum,p)=>sum+p.positions.filter(t=>!Number.isFinite(marks[t.symbol])||marks[t.symbol]<=0).length,0);
+  const estimatedNet=missingMarks?null:portfolios.reduce((sum,p)=>sum+portfolioStats(p,marks,state.config).estimatedEquity,0)-initial;
+  return {realised,openEstimate:estimatedNet===null?null:estimatedNet-realised,estimatedNet,openCount,closedCount,missingMarks,initial};
+}
