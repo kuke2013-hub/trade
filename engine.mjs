@@ -68,6 +68,21 @@ export function breakoutReadiness({close,resistance,trend,compression,volumeRati
   const readinessScore=Math.round(clamp(proximity*.42+trendScore+rsiScore+macdScore+volumeScore+relativeScore+(compression?12:0),0,100));
   return {distancePct,stage,readinessScore,proximity,volumeMeter:clamp(volumeRatio*50,0,100),rsiMeter:finite(r)?clamp(r,0,100):null};
 }
+// The latest completed 1h candle is unchanged until the NEXT hourly candle closes.
+// A fresh 24-hour ticker is still requested every minute to update pre-breakout distance.
+export function hourlyCacheCurrent(bars,now=Date.now()){
+  const last=Array.isArray(bars)?bars.at(-1):null;
+  return !!last&&finite(last.closeTime)&&finite(now)&&now<last.closeTime+3600000+1000;
+}
+// Live price affects DISPLAY/RANKING ONLY; the actual trade triggers remain on closed 1h bars.
+export function withLiveReadiness(closedAnalysis,lastTradedPrice){
+  if(!closedAnalysis||!finite(lastTradedPrice)||lastTradedPrice<=0)return closedAnalysis;
+  const a=closedAnalysis;
+  const live=breakoutReadiness({close:lastTradedPrice,resistance:a.resistance,trend:a.trend,
+    compression:a.compression,volumeRatio:a.volumeRatio,relative:a.relative,
+    technical:a.technical,breakout:a.breakout});
+  return {...a,...live,livePrice:lastTradedPrice};
+}
 export function analyse(candles,btcReturn24h=0){
   const c=candles, n=c.length;
   if(n<55)return null;

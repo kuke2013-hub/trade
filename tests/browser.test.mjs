@@ -33,14 +33,23 @@ try{
   browser=await chromium.launch({headless:true});
   const page=await browser.newPage({viewport:{width:1440,height:900}});
   const pageErrors=[];page.on('pageerror',err=>pageErrors.push(String(err)));
+  await page.addInitScript(()=>{
+    const original=window.setInterval.bind(window);
+    window.__scheduledIntervals=[];
+    window.setInterval=(callback,delay,...args)=>{
+      window.__scheduledIntervals.push({source:String(callback),delay});
+      return original(callback,delay,...args);
+    };
+  });
   const seenIntervals=new Set(),intervalRequests=new Map();
+  let tickerCalls=0,exchangeCalls=0,hourlyCalls=0;
   await page.route('https://data-api.binance.vision/api/v3/**',async route=>{
     const u=new URL(route.request().url()),p=u.pathname;
     let body;
-    if(p.endsWith('exchangeInfo'))body=info;
-    else if(p.endsWith('ticker/24hr'))body=tickers;
+    if(p.endsWith('exchangeInfo')){exchangeCalls++;body=info;}
+    else if(p.endsWith('ticker/24hr')){tickerCalls++;body=tickers;}
     else if(p.endsWith('bookTicker'))body={symbol:u.searchParams.get('symbol'),askPrice:'104',bidPrice:'103.9'};
-    else if(p.endsWith('klines')){const interval=u.searchParams.get('interval');seenIntervals.add(interval);intervalRequests.set(interval,(intervalRequests.get(interval)||0)+1);body=bars(u.searchParams.get('symbol'),interval);}
+    else if(p.endsWith('klines')){const interval=u.searchParams.get('interval');seenIntervals.add(interval);intervalRequests.set(interval,(intervalRequests.get(interval)||0)+1);if(interval==='1h')hourlyCalls++;body=bars(u.searchParams.get('symbol'),interval);}
     else throw new Error('Unexpected Binance route '+p);
     await route.fulfill({status:200,contentType:'application/json',headers:{'access-control-allow-origin':'*'},body:JSON.stringify(body)});
   });
@@ -90,6 +99,18 @@ try{
   assert.ok((intervalRequests.get('1m')||0)>before,'Manual short-candle refresh should request new Binance data');
   await page.locator('#filter').fill('MOM');assert.equal(await page.locator('.coin-card').count(),1);
   await page.locator('#filter').fill('');
+  // Recheck the entire universe from fresh ticker data without redownloading
+  // unchanged hourly history; this is the work a minute tick performs.
+  const scheduledScan=await page.evaluate(()=>window.__scheduledIntervals.find(i=>i.source.includes('scan()')));
+  assert.equal(scheduledScan?.delay,60000,'Full market scan must run every minute while tab is active');
+  const beforeTickers=tickerCalls,beforeHourly=hourlyCalls;
+  tickers.find(t=>t.symbol==='NEARUSDT').lastPrice='90';
+  await page.locator('#refresh').click();
+  await page.waitForFunction(()=>document.querySelector('.coin-card[data-symbol="NEARUSDT"] .card-stage')?.textContent.trim()==='OTHER',{timeout:30000});
+  assert.equal(tickerCalls,beforeTickers+1,'Refresh must request a new ticker snapshot');
+  assert.equal(exchangeCalls,1,'Static exchange metadata should be reused within one hour');
+  assert.equal(hourlyCalls,beforeHourly,'Unchanged 1h candle histories should remain cached');
+  assert.match(await page.locator('#scan-status').innerText(),/live rankings ~1 min/);
   await page.screenshot({path:'dashboard-smoke.png'});
   console.log(`UI INTEGRATION PASSED: ${pairs} pairs, ${analysed} analysed, ${signals} signal(s), all seven chart intervals, approaching-resistance rank and technical indicators, paper entry, filter/detail operational.`);
 }finally{if(browser)await browser.close();await new Promise(resolve=>server.close(resolve));}

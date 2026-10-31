@@ -118,3 +118,27 @@ test('confirmed breakouts are classified separately from approaching resistance'
   assert.ok(a.trigger.breakout);
   assert.ok(a.distancePct<0);
 });
+
+test('hourly candle cache remains valid between completed hourly closes',async()=>{
+  const {hourlyCacheCurrent}=await import('../engine.mjs');
+  const end=Date.UTC(2026,9,31,20,59,59,999);
+  const bars=[{closeTime:end}];
+  assert.equal(hourlyCacheCurrent(bars,end+10*60000),true);
+  assert.equal(hourlyCacheCurrent(bars,end+3599999),true);
+  assert.equal(hourlyCacheCurrent(bars,end+3601000),false);
+  assert.equal(hourlyCacheCurrent([],end),false);
+});
+test('live price re-ranks pre-breakouts without creating or changing a closed hourly entry signal',async()=>{
+  const {withLiveReadiness}=await import('../engine.mjs');
+  const c=series({breakout:false});
+  c[59]={...c[59],open:100.4,high:100.85,low:100.35,close:100.75,volume:120};
+  const base=analyse(c,0);
+  const near=withLiveReadiness(base,base.resistance*.99);
+  const far=withLiveReadiness(base,base.resistance*.90);
+  assert.equal(near.stage,'approaching');
+  assert.equal(far.stage,'other');
+  assert.ok(near.readinessScore>far.readinessScore);
+  assert.equal(near.lastBarTime,base.lastBarTime);
+  assert.deepEqual(near.trigger,base.trigger);
+  assert.deepEqual(far.trigger,base.trigger);
+});

@@ -1,4 +1,4 @@
-import {STRATEGIES,DEFAULT_CONFIG,parseKlines,analyse,createState,openPaper,closePaper,evaluateExit,portfolioStats,indicators,emaSeries} from './engine.mjs';
+import {STRATEGIES,DEFAULT_CONFIG,parseKlines,analyse,hourlyCacheCurrent,withLiveReadiness,createState,openPaper,closePaper,evaluateExit,portfolioStats,indicators,emaSeries} from './engine.mjs';
 const API='https://data-api.binance.vision/api/v3/';
 // Display-only candle intervals. Strategy signals and trade entries continue to use completed 1h bars.
 const CHART_LABELS=Object.freeze({'1M':'1 month','1w':'1 week','1d':'1 day','1h':'1 hour','5m':'5 minutes','3m':'3 minutes','1m':'1 minute'});
@@ -40,6 +40,8 @@ const pct=n=>Number.isFinite(+n)?`${+n>=0?'+':''}${num(n,2)}%`:'—';
 const cash=n=>Number.isFinite(n)?`${n<0?'-':''}$${num(Math.abs(n),2)}`:'—';
 const escape=s=>String(s).replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 let markets=[],bySymbol=new Map(),candles=new Map(),scores=new Map(),busy=false,observer=null,scannedAt=0,ready=false;
+const SCAN_EVERY_MS=60000;
+let exchangeCache=null;
 const visibleSymbols=new Set();let chartRefreshBusy=false,shortRefreshAt=0;
 let armed=localStorage.getItem('breakout-armed')==='yes';
 let paper;
@@ -50,8 +52,16 @@ function clearError(){$('error-banner').hidden=true;}
 function status(text){$('scan-status').textContent=text;}
 function setLive(){$('connection').classList.add('live');$('connection').innerHTML='<span class="status-dot"></span>CONNECTED · SPOT';}
 async function json(path,timeout=18000){const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),timeout);try{const r=await fetch(API+path,{signal:ctl.signal,cache:'no-store'});if(!r.ok)throw new Error(`Binance HTTP ${r.status} for ${path.split('?')[0]}`);return await r.json();}finally{clearTimeout(timer);}}
+async function loadExchangeInfo(){
+  if(exchangeCache&&Date.now()-exchangeCache.when<3600000)return exchangeCache.data;
+  const info=await json('exchangeInfo');
+  if(!info?.symbols)throw new Error('Unexpected Binance exchangeInfo response');
+  exchangeCache={when:Date.now(),data:info};
+  return info;
+}
 async function universe(){
-  const [info,tickers]=await Promise.all([json('exchangeInfo'),json('ticker/24hr')]);
+  // Live 24h market prices are retrieved every scan; static symbol metadata is cached for an hour.
+  const [info,tickers]=await Promise.all([loadExchangeInfo(),json('ticker/24hr')]);
   if(!info?.symbols||!Array.isArray(tickers))throw new Error('Unexpected Binance exchangeInfo/ticker response');
   const valid=new Set(info.symbols.filter(s=>s.quoteAsset==='USDT'&&s.status==='TRADING'&&s.isSpotTradingAllowed!==false).map(s=>s.symbol));
   const bad=/((UP|DOWN|BULL|BEAR)USDT)$/;const stable=/^(USDC|FDUSD|TUSD|DAI|USDP|USDE|EUR|EURI|BRL|TRY|AEUR|USD1)USDT$/;
@@ -67,7 +77,10 @@ function selection(){
   return [...new Set([...topVolume,...momentum,...activity,...markets].map(x=>x.symbol))]; // Analyse every monitored pair, not merely the early momentum sample.
 }
 async function loadBars(symbol,force=false){
-  const cached=candles.get(symbol);if(cached&&!force&&Date.now()-cached.when<5*60000)return cached.data;
+  const cached=candles.get(symbol);
+  // An unchanged completed 1h candle should not require another API call every minute.
+  // Reload at the next hourly close, or if data is missing/too old.
+  if(cached&&!force&&hourlyCacheCurrent(cached.data))return cached.data;
   const raw=await json(`klines?symbol=${encodeURIComponent(symbol)}&interval=1h&limit=95`);
   const bars=parseKlines(raw);
   if(bars.length<55)throw new Error('Insufficient closed hourly candles for '+symbol);
@@ -200,10 +213,15 @@ async function enterSignals(){if(!armed)return;const now=Date.now();const active
 async function scan(){if(busy)return;busy=true;clearError();$('refresh').disabled=true;
   try{status('Refreshing Binance spot market universe…');await universe();ready=true;setLive();
     // BTC is explicitly refreshed first to avoid an undefined relative-strength benchmark.
-    try{await loadBars('BTCUSDT',true);}catch(e){throw new Error('BTC benchmark unavailable: '+e.message);}
-    renderCards();status('Analysing closed 1h candles for liquid/moving pairs…');const selected=selection();let done=0;
-    const errors=await pool(selected,5,async sym=>{try{await loadBars(sym,true);}finally{done++;if(done%10===0||done===selected.length)status(`Processed ${done}/${selected.length} pairs`);}});
-    scannedAt=Date.now();$('metric-scanned').textContent=scores.size;$('metric-time').textContent=new Date(scannedAt).toISOString().slice(11,19);renderCards();renderApproaching();renderSignals();await managePositions();await enterSignals();paperUI();status(`Scan complete · ${scores.size}/${markets.length} analysed · ${errors} unavailable · hourly screening ~5 min`);
+    try{await loadBars('BTCUSDT');}catch(e){throw new Error('BTC benchmark unavailable: '+e.message);}
+    status('Updating live prices and checking closed 1h indicators…');const selected=selection();let done=0;
+    const errors=await pool(selected,5,async sym=>{try{await loadBars(sym);}finally{done++;if(done%25===0||done===selected.length)status(`Checked ${done}/${selected.length} pairs`);}});
+    // Re-rank all pairs every minute from FRESH last-traded prices, with indicators and
+    // ENTRY signals remaining tied to the latest COMPLETED hourly candle.
+    for(const m of markets){const a=scores.get(m.symbol);if(a)scores.set(m.symbol,withLiveReadiness(a,m.price));}
+    scannedAt=Date.now();const analysed=markets.filter(m=>scores.has(m.symbol)).length;
+    $('metric-scanned').textContent=analysed;$('metric-time').textContent=new Date(scannedAt).toISOString().slice(11,19);
+    renderCards();renderApproaching();renderSignals();await managePositions();await enterSignals();paperUI();status(`Scan complete · ${analysed}/${markets.length} analysed · ${errors} unavailable · live rankings ~1 min · signals 1h`);
     if(errors)showError(`${errors} symbols could not be analysed. Missing series were excluded, not estimated.`);
   }catch(e){status('Scan failed · no invented data');showError(e.message);}finally{busy=false;$('refresh').disabled=false;}
 }
@@ -215,7 +233,7 @@ function init(){
   $('chart-timeframes').addEventListener('click',e=>{const button=e.target.closest('button[data-interval]');if(!button||!Object.hasOwn(CHART_LABELS,button.dataset.interval))return;
     const chosen=button.dataset.interval;if(chosen===chartInterval)return;chartInterval=chosen;
     try{localStorage.setItem('breakout-chart-interval',chosen);}catch{}
-    selectInterval('chart-timeframes',chosen);renderCards();$('chart-refresh-state').textContent=shortInterval(chosen)?'Auto-refresh every ~60 seconds for visible charts while open.':'Hourly model scan continues every ~5 minutes.';
+    selectInterval('chart-timeframes',chosen);renderCards();$('chart-refresh-state').textContent=shortInterval(chosen)?'Auto-refresh every ~60 seconds for visible charts while open.':'Live market scan every ~1 minute; entry signals use completed 1H candles.';
     if(!$('detail').hidden){detailInterval=chosen;selectInterval('detail-timeframes',chosen);updateDetail();}
   });
   $('detail-timeframes').addEventListener('click',e=>{const button=e.target.closest('button[data-interval]');if(!button||!Object.hasOwn(CHART_LABELS,button.dataset.interval))return;
@@ -225,9 +243,9 @@ function init(){
   $('export').addEventListener('click',downloadCSV);$('reset').addEventListener('click',()=>{if(confirm('Erase all four local virtual portfolios and their trade history? This cannot be undone.')){paper=createState();save();paperUI();}});
   $('close-detail').addEventListener('click',()=>{$('detail').hidden=true;detailRequest++;});$('detail').querySelector('[data-close]').addEventListener('click',()=>{$('detail').hidden=true;detailRequest++;});document.addEventListener('keydown',e=>{if(e.key==='Escape'){$('detail').hidden=true;detailRequest++;}});
   const clock=()=>{$('clock').textContent=new Date().toISOString().slice(11,19)+' UTC';};clock();setInterval(clock,1000);
-  paperUI();scan();setInterval(()=>{if(!document.hidden)scan();},5*60000);setInterval(()=>{if(!document.hidden&&!busy)managePositions();},60000);
+  paperUI();scan();setInterval(()=>{if(!document.hidden)scan();},SCAN_EVERY_MS);setInterval(()=>{if(!document.hidden&&!busy)managePositions();},60000);
   setInterval(()=>{if(!document.hidden)refreshVisibleCharts();},60000);
-  document.addEventListener('visibilitychange',()=>{if(!document.hidden&&shortInterval(chartInterval))refreshVisibleCharts();});
-  $('chart-refresh-state').textContent=shortInterval(chartInterval)?'Visible charts auto-refresh every ~60 seconds while open.':'Hourly model scan continues every ~5 minutes.';
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden){scan();if(shortInterval(chartInterval))refreshVisibleCharts();}});
+  $('chart-refresh-state').textContent=shortInterval(chartInterval)?'Visible charts auto-refresh every ~60 seconds while open.':'Live market scan every ~1 minute; entry signals use completed 1H candles.';
 }
 init();
