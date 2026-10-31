@@ -16,6 +16,58 @@ export function parseKlines(raw, now = Date.now()) {
 export function sma(xs) { return xs.length ? xs.reduce((a,b)=>a+b,0)/xs.length : NaN; }
 export function ema(values,period){if(values.length<period)return NaN;let v=sma(values.slice(0,period));let alpha=2/(period+1);for(let i=period;i<values.length;i++)v=values[i]*alpha+v*(1-alpha);return v;}
 export function atr(cs,period=14){if(cs.length<period+1)return NaN;const a=[];for(let i=cs.length-period;i<cs.length;i++){const x=cs[i],p=cs[i-1].close;a.push(Math.max(x.high-x.low,Math.abs(x.high-p),Math.abs(x.low-p)));}return sma(a);}
+// Closed-candle indicators, with NaN for insufficient input; never substitute a fake value.
+export function rsi(values,period=14){
+  if(values.length<period+1)return NaN;
+  let gain=0,loss=0;
+  for(let i=1;i<=period;i++){const d=values[i]-values[i-1];gain+=Math.max(d,0);loss+=Math.max(-d,0);}
+  gain/=period;loss/=period;
+  for(let i=period+1;i<values.length;i++){
+    const d=values[i]-values[i-1];gain=(gain*(period-1)+Math.max(d,0))/period;loss=(loss*(period-1)+Math.max(-d,0))/period;
+  }
+  return loss===0?(gain===0?50:100):100-100/(1+gain/loss);
+}
+export function emaSeries(values,period){
+  const out=Array(values.length).fill(NaN);
+  if(values.length<period)return out;
+  let value=sma(values.slice(0,period));out[period-1]=value;
+  for(let i=period;i<values.length;i++){value=values[i]*(2/(period+1))+value*(1-2/(period+1));out[i]=value;}
+  return out;
+}
+export function macd(values){
+  const fast=emaSeries(values,12),slow=emaSeries(values,26);
+  const points=fast.map((v,i)=>finite(v)&&finite(slow[i])?v-slow[i]:NaN).filter(finite);
+  const signal=ema(points,9),line=points.at(-1);
+  return {line,signal,histogram:finite(line)&&finite(signal)?line-signal:NaN};
+}
+export function bollinger(values,period=20,multiple=2){
+  if(values.length<period)return {middle:NaN,upper:NaN,lower:NaN,widthPct:NaN};
+  const recent=values.slice(-period),middle=sma(recent);
+  const sd=Math.sqrt(sma(recent.map(v=>(v-middle)**2)));
+  const upper=middle+multiple*sd,lower=middle-multiple*sd;
+  return {middle,upper,lower,widthPct:middle>0?(upper-lower)/middle*100:NaN};
+}
+export function indicators(bars){
+  const closes=bars.map(c=>c.close),close=closes.at(-1);
+  const atr14=atr(bars,14),m=macd(closes);
+  return {ema9:ema(closes,9),ema21:ema(closes,21),ema50:ema(closes,50),rsi14:rsi(closes),macd:m,bollinger:bollinger(closes),atr14,atrPct:finite(atr14)&&close>0?100*atr14/close:NaN};
+}
+const clamp=(x,min,max)=>Math.max(min,Math.min(max,x));
+// Ranking only: a pre-breakout research heuristic, not a statistically calibrated chance of profit.
+export function breakoutReadiness({close,resistance,trend,compression,volumeRatio,relative,technical,breakout}){
+  const distancePct=resistance>0?(resistance-close)/resistance*100:NaN;
+  const r=technical.rsi14,m=technical.macd.histogram;
+  const emerging=finite(distancePct)&&distancePct>0&&distancePct<=3&&(trend||(finite(r)&&r>=53&&r<=72&&finite(m)&&m>0&&volumeRatio>=1.1));
+  const stage=breakout?'confirmed':emerging?'approaching':finite(distancePct)&&distancePct>0&&distancePct<=7?'watch':'other';
+  const proximity=finite(distancePct)?clamp(100*(1-distancePct/3),0,100):0;
+  const trendScore=trend?14:0;
+  const rsiScore=finite(r)&&r>=48&&r<=70?10:finite(r)&&r>70&&r<=78?3:0;
+  const macdScore=finite(m)&&m>0?8:0;
+  const volumeScore=clamp(volumeRatio*6,0,12);
+  const relativeScore=clamp(relative*2,0,12);
+  const readinessScore=Math.round(clamp(proximity*.42+trendScore+rsiScore+macdScore+volumeScore+relativeScore+(compression?12:0),0,100));
+  return {distancePct,stage,readinessScore,proximity,volumeMeter:clamp(volumeRatio*50,0,100),rsiMeter:finite(r)?clamp(r,0,100):null};
+}
 export function analyse(candles,btcReturn24h=0){
   const c=candles, n=c.length;
   if(n<55)return null;
@@ -35,9 +87,11 @@ export function analyse(candles,btcReturn24h=0){
   const oldRanges=c.slice(n-33,n-9).map(x=>(x.high-x.low)/x.close);
   const compression=sma(recentRanges)<sma(oldRanges)*0.8;
   const trigger={breakout,volume:breakout&&volumeRatio>=1.5,compression:breakout&&compression&&volumeRatio>=1.2,strength:breakout&&relative>=3&&trend};
-  // Heuristic ranking score, NOT a probability of return or calibrated confidence.
-  const setup=Math.round(Math.min(100,Math.max(0, (breakout?34:0)+(trend?18:0)+Math.min(20,volumeRatio*7)+(compression?12:0)+Math.min(16,Math.max(0,relative)*2))));
-  return {resistance,volumeRatio,closeLocation,trend,breakout,compression,relative,coin24h,atr:atr(c),score:setup,trigger,lastBarTime:last.closeTime,close:last.close, volume:last.volume};
+  const technical=indicators(c);
+  const readiness=breakoutReadiness({close:last.close,resistance,trend,compression,volumeRatio,relative,technical,breakout});
+  // Existing hourly breakout score is retained for confirmed-signal sorting and paper entries.
+  const setup=Math.round(Math.min(100,Math.max(0,(breakout?34:0)+(trend?18:0)+Math.min(20,volumeRatio*7)+(compression?12:0)+Math.min(16,Math.max(0,relative)*2))));
+  return {resistance,volumeRatio,closeLocation,trend,breakout,compression,relative,coin24h,atr:technical.atr14,score:setup,technical,...readiness,trigger,lastBarTime:last.closeTime,close:last.close,volume:last.volume};
 }
 export function createState(config=DEFAULT_CONFIG){return {version:1,config:{...DEFAULT_CONFIG,...config},portfolios:Object.fromEntries(STRATEGIES.map(s=>[s.id,{cash:config.startingCash??DEFAULT_CONFIG.startingCash,positions:[],trades:[],seenSignals:{}}])),createdAt:Date.now(),updatedAt:Date.now()};}
 export function fillBuy(quote,config){const execution=quote*(1+config.slippagePct/100);const feeRate=config.feePct/100;return {execution,quantity:(config.allocation/(1+feeRate))/execution,entryFee:config.allocation*feeRate/(1+feeRate)};}

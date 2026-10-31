@@ -80,3 +80,41 @@ test('sell proceeds and fee formulas are mathematically consistent',()=>{
   assert.ok(s.net<c.allocation);
   assert.ok(Math.abs(s.net-b.quantity*100*(1-c.slippagePct/100)*(1-c.feePct/100))<1e-8);
 });
+
+// These formulas are validated against constructed price sequences, not market profitability.
+test('RSI Wilder calculation returns correct limits for monotonic and flat prices',async()=>{
+  const {rsi}=await import('../engine.mjs');
+  assert.equal(rsi(Array.from({length:30},(_,i)=>100+i)),100);
+  assert.equal(rsi(Array.from({length:30},(_,i)=>100-i)),0);
+  assert.equal(rsi(Array(30).fill(100)),50);
+  assert.ok(Number.isNaN(rsi([1,2,3])));
+});
+test('MACD, Bollinger and ATR indicators do not produce values without adequate history',async()=>{
+  const {indicators,macd,bollinger}=await import('../engine.mjs');
+  const sequence=Array.from({length:95},(_,i)=>100+i*.1);
+  const m=macd(sequence),bands=bollinger(sequence);
+  assert.ok(m.histogram>=-1e-9&&Number.isFinite(m.signal));
+  assert.ok(bands.upper>bands.middle&&bands.middle>bands.lower&&bands.widthPct>0);
+  assert.ok(Number.isNaN(macd([10,11]).signal));
+  const last=indicators(series());
+  assert.ok(Number.isFinite(last.rsi14));
+  assert.ok(Number.isFinite(last.ema50));
+  assert.ok(Number.isFinite(last.atrPct));
+});
+test('pre-breakout signals are based only on completed hourly candles and never trigger a paper entry',async()=>{
+  const c=series({breakout:false});
+  // Prior highs near 101; last candle approaches from below.
+  c[59]={...c[59],open:100.4,high:100.85,low:100.35,close:100.75,volume:120};
+  const a=analyse(c,0);
+  assert.equal(a.stage,'approaching');
+  assert.equal(a.trigger.breakout,false);
+  assert.ok(a.distancePct>0&&a.distancePct<3);
+  assert.ok(a.readinessScore>=0&&a.readinessScore<=100);
+  assert.ok(a.proximity>0);
+});
+test('confirmed breakouts are classified separately from approaching resistance',()=>{
+  const a=analyse(series({breakout:true}));
+  assert.equal(a.stage,'confirmed');
+  assert.ok(a.trigger.breakout);
+  assert.ok(a.distancePct<0);
+});
