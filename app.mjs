@@ -1,5 +1,38 @@
 import {STRATEGIES,DEFAULT_CONFIG,parseKlines,analyse,createState,openPaper,closePaper,evaluateExit,portfolioStats} from './engine.mjs';
 const API='https://data-api.binance.vision/api/v3/';
+// Display-only candle intervals. Strategy signals and trade entries continue to use completed 1h bars.
+const CHART_LABELS=Object.freeze({'1M':'1 month','1w':'1 week','1d':'1 day','1h':'1 hour','3m':'3 minutes','1m':'1 minute'});
+const savedInterval=localStorage.getItem('breakout-chart-interval');
+let chartInterval=Object.hasOwn(CHART_LABELS,savedInterval)?savedInterval:'1h';
+let detailInterval=chartInterval,detailSymbol=null,detailRequest=0;
+const displayCandles=new Map(),displayInFlight=new Map();
+// Intervals are whitelisted above. Cache keys include symbol + interval to prevent cross-timeframe corruption.
+function displayKey(symbol,interval){return `${symbol}|${interval}`;}
+function displayCacheMs(interval){return interval==='1m'?30000:interval==='3m'?60000:180000;}
+async function loadDisplayBars(symbol,interval){
+  if(!Object.hasOwn(CHART_LABELS,interval))throw new Error('Unsupported candle interval');
+  const key=displayKey(symbol,interval),cached=displayCandles.get(key);
+  if(cached&&Date.now()-cached.when<displayCacheMs(interval))return cached.bars;
+  if(displayInFlight.has(key))return displayInFlight.get(key);
+  const request=(async()=>{
+    const raw=await json(`klines?symbol=${encodeURIComponent(symbol)}&interval=${interval}&limit=95`);
+    // An in-progress candle is appropriate for a display, but NEVER passed to analyse()/trade signals.
+    const bars=parseKlines(raw,Infinity);
+    if(bars.length<2)throw new Error(`Insufficient ${CHART_LABELS[interval]} candles for ${symbol}`);
+    displayCandles.set(key,{when:Date.now(),bars});
+    return bars;
+  })();
+  displayInFlight.set(key,request);
+  try{return await request;}finally{displayInFlight.delete(key);}
+}
+function selectInterval(container,interval){
+  document.querySelectorAll(`#${container} [data-interval]`).forEach(b=>{
+    const active=b.dataset.interval===interval;
+    b.classList.toggle('active',active);b.setAttribute('aria-pressed',String(active));
+  });
+}
+function drawChartError(canvas,message){const ctx=canvas.getContext('2d');ctx.clearRect(0,0,canvas.width,canvas.height);ctx.fillStyle='#98a4b7';ctx.font='18px sans-serif';ctx.fillText(message,18,Math.round(canvas.height*.5));}
+
 const $=id=>document.getElementById(id);
 const quote=s=>String(s).replace(/USDT$/,'');
 const num=(n,d=2)=>Number.isFinite(+n)?Number(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d}):'—';
@@ -46,11 +79,16 @@ async function loadBars(symbol,force=false){
 async function pool(items,n,handler){let index=0,errors=0;async function work(){while(index<items.length){const i=index++;try{await handler(items[i],i);}catch(e){errors++;if(errors<5)console.warn('Market series unavailable',items[i],e.message);}}}await Promise.all(Array.from({length:n},work));return errors;}
 function triggers(a){return a?STRATEGIES.filter(s=>a.trigger[s.id]):[];}
 function orderPairs(){const sort=$('sort').value,find=$('filter').value.trim().toUpperCase();let arr=markets.filter(m=>m.symbol.includes(find));arr.sort((a,b)=>{if(sort==='gain')return b.change-a.change;if(sort==='volume')return b.volume-a.volume;if(sort==='alphabetical')return a.symbol.localeCompare(b.symbol);return (scores.get(b.symbol)?.score??-1)-(scores.get(a.symbol)?.score??-1)||b.volume-a.volume;});return arr;}
-function cardHTML(m){const a=scores.get(m.symbol),sc=a?String(a.score):'—';return `<article class="coin-card" data-symbol="${escape(m.symbol)}" tabindex="0" role="button" aria-label="Open ${escape(m.symbol)} analysis"><div class="card-top"><div><div class="symbol">${escape(quote(m.symbol))}<span class="pair-quote">/USDT</span></div><div class="small-muted">24H ${pct(m.change)}</div></div><div><div class="score">${sc}</div><span class="score-label">SETUP /100</span></div></div><canvas width="560" height="210" aria-label="Hourly price chart for ${escape(m.symbol)}"></canvas><div class="card-bottom"><span>${a?triggers(a).length+' triggered models':'UNSCANNED'}</span><span class="${m.change>=0?'up':'down'}">VOL ${m.volume>=1e6?num(m.volume/1e6,1)+'M':num(m.volume/1e3,0)+'K'} USDT</span></div></article>`;}
+function cardHTML(m){const a=scores.get(m.symbol),sc=a?String(a.score):'—';return `<article class="coin-card" data-symbol="${escape(m.symbol)}" tabindex="0" role="button" aria-label="Open ${escape(m.symbol)} analysis"><div class="card-top"><div><div class="symbol">${escape(quote(m.symbol))}<span class="pair-quote">/USDT</span></div><div class="small-muted">24H ${pct(m.change)}</div></div><div><div class="score">${sc}</div><span class="score-label">SETUP /100</span></div></div><canvas width="560" height="210" aria-label="${escape(CHART_LABELS[chartInterval])} candle chart for ${escape(m.symbol)}"></canvas><div class="card-bottom"><span>${a?triggers(a).length+' triggered models':'UNSCANNED'}</span><span class="${m.change>=0?'up':'down'}">VOL ${m.volume>=1e6?num(m.volume/1e6,1)+'M':num(m.volume/1e3,0)+'K'} USDT</span></div></article>`;}
 function renderCards(){
   if(observer)observer.disconnect();
   const cards=$('cards'),arr=orderPairs();cards.innerHTML=arr.length?arr.map(cardHTML).join(''):'<div class="empty">No matching trading pairs.</div>';
-  observer=new IntersectionObserver(entries=>{for(const e of entries){if(!e.isIntersecting)continue;observer.unobserve(e.target);const symbol=e.target.dataset.symbol;if(candles.has(symbol))drawCard(e.target,symbol);else loadBars(symbol).then(()=>drawCard(e.target,symbol)).catch(()=>{const ctx=e.target.querySelector('canvas').getContext('2d');ctx.fillStyle='#8291a8';ctx.font='20px sans-serif';ctx.fillText('Chart unavailable',20,95);});}},{rootMargin:'200px'});
+  const requestedInterval=chartInterval;
+  observer=new IntersectionObserver(entries=>{for(const e of entries){if(!e.isIntersecting)continue;observer.unobserve(e.target);const node=e.target,symbol=node.dataset.symbol;
+    loadDisplayBars(symbol,requestedInterval).then(bars=>drawCard(node,symbol,requestedInterval,bars)).catch(()=>{
+      if(node.isConnected&&chartInterval===requestedInterval)drawChartError(node.querySelector('canvas'),'Chart unavailable');
+    });
+  }},{rootMargin:'120px'});
   cards.querySelectorAll('.coin-card').forEach(node=>{observer.observe(node);node.addEventListener('click',()=>detail(node.dataset.symbol));node.addEventListener('keydown',e=>{if(e.key==='Enter')detail(node.dataset.symbol);});});
 }
 function drawCandles(canvas,bars,resistance=null){
@@ -64,14 +102,32 @@ function drawCandles(canvas,bars,resistance=null){
   const vm=Math.max(1,...data.map(c=>c.volume));
   data.forEach((c,i)=>{const x=left+step*(i+.5),up=c.close>=c.open,color=up?'#3ee1a2':'#fa7180';context.strokeStyle=color;context.fillStyle=color;context.lineWidth=Math.max(1.5,step*.17);context.beginPath();context.moveTo(x,yy(c.high));context.lineTo(x,yy(c.low));context.stroke();const ya=yy(Math.max(c.open,c.close)),yb=yy(Math.min(c.open,c.close));context.fillRect(x-step*.27,ya,Math.max(2,step*.54),Math.max(2,yb-ya));context.globalAlpha=.3;context.fillRect(x-step*.27,H*.98-(c.volume/vm)*H*.15,Math.max(2,step*.54),(c.volume/vm)*H*.15);context.globalAlpha=1;});
 }
-function drawCard(node,symbol){if(!node.isConnected)return;const bar=candles.get(symbol)?.data;drawCandles(node.querySelector('canvas'),bar,scores.get(symbol)?.resistance);const score=scores.get(symbol);if(score){node.querySelector('.score').textContent=score.score;node.querySelector('.card-bottom span').textContent=triggers(score).length+' triggered models';}}
+function drawCard(node,symbol,interval,bars){if(!node.isConnected||chartInterval!==interval)return;const canvas=node.querySelector('canvas');drawCandles(canvas,bars,interval==='1h'?scores.get(symbol)?.resistance:null);canvas.dataset.interval=interval;
+  const score=scores.get(symbol);if(score){node.querySelector('.score').textContent=score.score;node.querySelector('.card-bottom span').textContent=triggers(score).length+' triggered models';}}
 function renderSignals(){const matches=markets.filter(x=>triggers(scores.get(x.symbol)).length).sort((a,b)=>(scores.get(b.symbol).score-scores.get(a.symbol).score));$('metric-signals').textContent=matches.length;
   $('signals').innerHTML=matches.length?matches.slice(0,8).map(m=>{const a=scores.get(m.symbol);return `<div class="signal-tile" data-symbol="${escape(m.symbol)}" tabindex="0" role="button"><div class="tile-top"><div><div class="symbol">${escape(quote(m.symbol))}<span class="pair-quote">/USDT</span></div><div class="small-muted">24H ${pct(m.change)}</div></div><div><div class="score">${a.score}</div><div class="score-label">SETUP /100</div></div></div><div class="tile-details">Relative strength vs BTC: ${pct(a.relative)}<br>Volume / 20h avg: ${num(a.volumeRatio,1)}×</div><span class="tile-label">${escape(triggers(a).map(s=>s.name).join(' · '))}</span></div>`;}).join(''):'<div class="empty">No confirmed breakout triggers among analysed pairs. This is a valid no-trade result.</div>';
   $('signals').querySelectorAll('[data-symbol]').forEach(n=>{n.addEventListener('click',()=>detail(n.dataset.symbol));n.addEventListener('keydown',e=>{if(e.key==='Enter')detail(n.dataset.symbol)});});
 }
-async function detail(symbol){$('detail').hidden=false;$('detail-symbol').textContent=symbol;$('detail-stats').textContent='Loading confirmed hourly candles…';$('detail-explanation').textContent='';const canvas=$('detail-chart');canvas.getContext('2d').clearRect(0,0,canvas.width,canvas.height);
-  try{const bars=await loadBars(symbol),a=scores.get(symbol),m=bySymbol.get(symbol);drawCandles(canvas,bars,a?.resistance);$('detail-stats').innerHTML=`<span>LAST <b>${num(m?.price,6)}</b> USDT</span><span>24H <b>${pct(m?.change)}</b></span><span>RESISTANCE <b>${num(a?.resistance,6)}</b></span><span>VOLUME RATIO <b>${num(a?.volumeRatio,2)}×</b></span><span>SETUP <b>${a?.score??'—'}/100</b></span>`;$('detail-explanation').innerHTML=a?`<strong>Strategy triggers:</strong> ${triggers(a).length?triggers(a).map(s=>escape(s.name)).join(', '):'None'}<br><strong>Relative strength versus BTC:</strong> ${pct(a.relative)}. <strong>Trend filter:</strong> ${a.trend?'positive':'not confirmed'}. <strong>Pre-breakout compression:</strong> ${a.compression?'detected':'not detected'}.<br>These are deterministic screening rules, not calibrated forecasts of future returns.`:'Insufficient data for a calculation.';}
-  catch(e){$('detail-stats').textContent='Market candles unavailable: '+e.message;}
+async function detail(symbol){
+  detailSymbol=symbol;
+  $('detail').hidden=false;$('detail-symbol').textContent=symbol;
+  detailInterval=chartInterval;selectInterval('detail-timeframes',detailInterval);
+  await updateDetail();
+}
+async function updateDetail(){
+  if(!detailSymbol||$('detail').hidden)return;
+  const symbol=detailSymbol,interval=detailInterval,requestId=++detailRequest,canvas=$('detail-chart');
+  $('detail-timeframe-label').textContent=`PAIR DETAIL / ${interval==='1M'?'1M':interval.toUpperCase()} CHART`;
+  $('detail-stats').textContent=`Loading ${CHART_LABELS[interval]} candles…`;
+  $('detail-explanation').textContent='';canvas.getContext('2d').clearRect(0,0,canvas.width,canvas.height);
+  try{
+    const bars=await loadDisplayBars(symbol,interval);
+    if(requestId!==detailRequest||$('detail').hidden)return;
+    const a=scores.get(symbol),m=bySymbol.get(symbol);
+    drawCandles(canvas,bars,interval==='1h'?a?.resistance:null);canvas.dataset.interval=interval;
+    $('detail-stats').innerHTML=`<span>CHART <b>${escape(CHART_LABELS[interval])} candles</b></span><span>AVAILABLE <b>${bars.length} bars</b></span><span>LAST <b>${num(m?.price,6)}</b> USDT</span><span>24H <b>${pct(m?.change)}</b></span><span>1H RESISTANCE <b>${num(a?.resistance,6)}</b></span><span>1H SETUP <b>${a?.score??'—'}/100</b></span>`;
+    $('detail-explanation').innerHTML=a?`<strong>Hourly strategy triggers:</strong> ${triggers(a).length?triggers(a).map(s=>escape(s.name)).join(', '):'None'}<br><strong>Relative strength versus BTC:</strong> ${pct(a.relative)}. <strong>Hourly trend filter:</strong> ${a.trend?'positive':'not confirmed'}. <strong>Hourly pre-breakout compression:</strong> ${a.compression?'detected':'not detected'}.<br>Chart candles may be in progress. All model scores and paper trades remain based on confirmed 1-hour candles.`:'This pair has no completed hourly model assessment. Chart candles may include the current unfinished bar.';
+  }catch(e){if(requestId===detailRequest&&!$('detail').hidden){$('detail-stats').textContent='Market candles unavailable: '+e.message;drawChartError(canvas,'Chart unavailable');}}
 }
 function paperUI(){const n=$('paper-notice');n.classList.toggle('active',armed);n.textContent=armed?'ARMED · Virtual long trades may open after a fresh, confirmed hourly signal. Scanning and exits only work while this browser tab is running.':'PAUSED · No new positions will open. The simulator runs only while this page is open. Existing paper positions are checked when market data are available.';$('paper-toggle').textContent=armed?'Pause new trades':'Start paper engine';
   $('portfolios').innerHTML=STRATEGIES.map(s=>{const p=paper.portfolios[s.id],st=portfolioStats(p,Object.fromEntries(markets.map(m=>[m.symbol,m.price])),paper.config);return `<div class="portfolio"><h3>${escape(s.name)}</h3><div class="fine">STARTED $${num(paper.config.startingCash,0)} · ${st.openCount} OPEN</div><div class="net ${st.realised>0?'pos':st.realised<0?'neg':''}">${cash(st.realised)}</div><div class="fine">REALIZED NET P&amp;L<br>${st.trades} CLOSED TRADES · WIN RATE ${st.winRate===null?'—':num(st.winRate,1)+'%'}<br>EST. EQUITY ${cash(st.estimatedEquity)}</div></div>`;}).join('');
@@ -108,9 +164,19 @@ function downloadCSV(){const all=STRATEGIES.flatMap(s=>paper.portfolios[s.id].tr
 function init(){
   $('methods').innerHTML=STRATEGIES.map((s,i)=>`<div class="method-card"><div class="ordinal">MODEL 0${i+1}</div><h3>${escape(s.name)}</h3><p>${escape(s.description)} Requires a closed hourly breakout candle; the additional filters vary by model. Every model begins with its own $10,000 simulated cash balance.</p></div>`).join('');
   $('refresh').addEventListener('click',scan);$('filter').addEventListener('input',renderCards);$('sort').addEventListener('change',renderCards);
+  selectInterval('chart-timeframes',chartInterval);selectInterval('detail-timeframes',chartInterval);
+  $('chart-timeframes').addEventListener('click',e=>{const button=e.target.closest('button[data-interval]');if(!button||!Object.hasOwn(CHART_LABELS,button.dataset.interval))return;
+    const chosen=button.dataset.interval;if(chosen===chartInterval)return;chartInterval=chosen;
+    try{localStorage.setItem('breakout-chart-interval',chosen);}catch{}
+    selectInterval('chart-timeframes',chosen);renderCards();
+    if(!$('detail').hidden){detailInterval=chosen;selectInterval('detail-timeframes',chosen);updateDetail();}
+  });
+  $('detail-timeframes').addEventListener('click',e=>{const button=e.target.closest('button[data-interval]');if(!button||!Object.hasOwn(CHART_LABELS,button.dataset.interval))return;
+    detailInterval=button.dataset.interval;selectInterval('detail-timeframes',detailInterval);updateDetail();
+  });
   $('paper-toggle').addEventListener('click',()=>{armed=!armed;localStorage.setItem('breakout-armed',armed?'yes':'no');paperUI();if(armed&&ready)enterSignals();});
   $('export').addEventListener('click',downloadCSV);$('reset').addEventListener('click',()=>{if(confirm('Erase all four local virtual portfolios and their trade history? This cannot be undone.')){paper=createState();save();paperUI();}});
-  $('close-detail').addEventListener('click',()=>{$('detail').hidden=true;});$('detail').querySelector('[data-close]').addEventListener('click',()=>{$('detail').hidden=true;});document.addEventListener('keydown',e=>{if(e.key==='Escape')$('detail').hidden=true;});
+  $('close-detail').addEventListener('click',()=>{$('detail').hidden=true;detailRequest++;});$('detail').querySelector('[data-close]').addEventListener('click',()=>{$('detail').hidden=true;detailRequest++;});document.addEventListener('keydown',e=>{if(e.key==='Escape'){$('detail').hidden=true;detailRequest++;}});
   const clock=()=>{$('clock').textContent=new Date().toISOString().slice(11,19)+' UTC';};clock();setInterval(clock,1000);
   paperUI();scan();setInterval(()=>{if(!document.hidden)scan();},5*60000);setInterval(()=>{if(!document.hidden&&!busy)managePositions();},60000);
 }

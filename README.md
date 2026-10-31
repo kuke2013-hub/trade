@@ -19,7 +19,7 @@ The GitHub Actions **CI** workflow tests the core algorithms on each push; Pages
 - Fetches live public `/api/v3/exchangeInfo`, `/api/v3/ticker/24hr` and 1-hour `/api/v3/klines` data from `https://data-api.binance.vision` without keys.
 - Lists up to 360 liquid, currently tradable **spot USDT** pairs after basic liquidity and leveraged-token exclusions.
 - Initially scans a diversified candidate sample by trading volume, positive 24-hour movers and large absolute moves. Additional pair charts are loaded on scroll. Not every displayed pair is always analysed; the UI distinguishes **unscanned** from **analysed**.
-- Displays 1-hour candles with a previous-high resistance guide and ranks candidates on a **heuristic 0–100 setup score**. This score is emphatically **not a calibrated probability** of a 2% price rise.
+- Displays selectable **1-month (`1M`), 1-week (`1w`), 1-day (`1d`), 1-hour (`1h`), 3-minute (`3m`) and 1-minute (`1m`)** candles in the pair explorer and the enlarged chart. Charts lazily retrieve real Binance candles (including the currently forming candle); requests are cached by symbol and interval. The **model always uses only completed hourly candles**, regardless of chart selection. The hourly chart has a previous-high resistance guide and ranks candidates on a **heuristic 0–100 setup score**. This score is emphatically **not a calibrated probability** of a 2% price rise.
 - Runs four independent rules on **completed** hourly candles: resistance breakout, volume-confirmed breakout, volatility-compression breakout, and relative-strength breakout versus BTC.
 - Provides four separate simulated spot portfolios with $10,000 initial cash, $200 virtual position sizes, three simultaneous positions per strategy, +2% gross execution-price target, −1.5% gross execution-price stop, 24-hour holding timeout, 0.1% simulated fee per side and 0.05% simulated slippage per side.
 - Records virtual entries, exits, fees and realised P&L in browser `localStorage`; downloadable CSV provides an audit trail of closed trades.
@@ -65,3 +65,7 @@ Data sources: [Binance market-data-only API](https://github.com/binance/binance-
 ## Automated validation
 
 The GitHub Actions pipeline runs **11 deterministic unit tests** for candle filtering, all four signal models, fees, stop/target ambiguity, time-based exits, data-gap rejection and duplicate orders. It also runs a Chromium/Playwright **UI integration smoke test** against explicitly synthetic exchange-shaped fixtures (no synthetic data is shipped in the production application). The browser test checks large-universe rendering, a confirmed breakout, a simulated order, chart drill-down and symbol filtering. These confirm software behaviour, **not** profitability or real-world exchange availability.
+
+## Chart timeframes
+
+Use the **CANDLE INTERVAL** buttons above the pair cards to change all small charts. Open a pair to select a different interval in its detailed chart independently. `1M` means a monthly candle; `1m` means a one-minute candle. The most recent candle in the chart can still be forming, while trading signals always use **completed hourly candles**. The chart data is polled, not an uninterrupted streaming feed.
