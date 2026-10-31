@@ -60,3 +60,256 @@
 #detail-paper-hint,.chart-timestamp-note{color:var(--sub);font-size:11px;line-height:1.7;margin:9px 0 0}
 .chart-timestamp-note{margin:8px 0 11px}
 .trade-ledger-row{cursor:pointer}.trade-ledger-row:hover td,.trade-ledger-row:focus td{background:#172735;color:var(--text)}
+
+/* MATRIX-INSPIRED TERMINAL THEME — VISUAL ONLY.
+   Core market data, algorithms, paper trading, trade markers and red risk signals stay unchanged. */
+:root {
+  color-scheme: dark;
+  --bg: #020704;
+  --side: #030a05;
+  --panel: #07130b;
+  --panel2: #0a1b0e;
+  --line: #275033;
+  --text: #d1f8d6;
+  --sub: #91c79d;
+  --faint: #638b6b;
+  --green: #6dff83;
+  --red: #ff687e;
+  --amber: #c8de72;
+  --teal: #79ffae;
+  font-family: 'Share Tech Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+  font-variant-numeric: tabular-nums;
+}
+body {
+  background: radial-gradient(ellipse 75% 42% at 72% -12%, rgba(53,151,74,.12), transparent 75%),
+              linear-gradient(90deg, rgba(15,62,28,.04) 1px, transparent 1px),
+              linear-gradient(#020704,#020704);
+  background-size: auto, 86px 86px, auto;
+  color: var(--text);
+  letter-spacing: .015em;
+}
+/* A subtle CRT glass layer. It never captures pointer input. */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 99;
+  pointer-events: none;
+  background: repeating-linear-gradient(180deg, transparent 0px, transparent 3px, rgba(0,0,0,.19) 4px);
+  opacity: .35;
+}
+::selection { background:#377e46; color:#effff0; }
+a, button, input, select { font-family: inherit; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible,
+.coin-card:focus-visible, .signal-tile:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 3px;
+}
+.sidebar {
+  overflow: hidden;
+  background: linear-gradient(178deg,#05150a 0%, #030a05 52%,#010503 100%);
+  border-right-color: #2a6c3a;
+  box-shadow: 5px 0 30px rgba(0,0,0,.35);
+}
+.sidebar::before {
+  content: '01001101 01000001 01010100 01010010 01001001 01011000 00110101 01000100 01000101 01000011 01001111 01000100 01000101';
+  position: absolute;
+  right: 8px;
+  top: 245px;
+  bottom: 42px;
+  width: 26px;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  line-height: 23px;
+  font-size: 9px;
+  color: #53f979;
+  opacity: .1;
+  pointer-events: none;
+}
+.sidebar > * {position:relative;z-index:1}
+.brand { letter-spacing: .13em; }
+.brand strong { color:var(--green); font-size: 15px; text-shadow:0 0 13px rgba(67,255,107,.3); }
+.brand small { color:var(--sub); letter-spacing:.1em; }
+.logo {
+  border: 1px solid #50ed72;
+  color: var(--green);
+  background: #041008;
+  border-radius: 2px;
+  box-shadow: 0 0 13px rgba(82,255,122,.25), inset 0 0 12px rgba(82,255,122,.08);
+}
+.side-label,.eyebrow,.metric-label,.data-tag { color:var(--green); }
+.side-label::before {content:'> ';}
+.nav-link { border:1px solid transparent; border-radius:2px; letter-spacing:.04em; }
+.nav-link:hover,.nav-link.active {
+  color:var(--green);
+  background:#0a2110;
+  border-color:#2b6d3a;
+  box-shadow: inset 2px 0 0 var(--green);
+}
+.side-bottom{color:var(--sub)}
+.topbar {
+  background:rgba(3,12,6,.86);
+  border-bottom-color:#255b32;
+  box-shadow: 0 1px 14px rgba(27,152,59,.08);
+}
+.breadcrumb, .top-meta, .connection {letter-spacing:.075em}
+.breadcrumb span { color:var(--green); }
+.connection.live {text-shadow:0 0 8px rgba(67,255,107,.34)}
+.content {position:relative}
+.hero {position:relative;border-bottom:1px solid rgba(65,150,77,.17)}
+.hero::before {
+  content:'// SIGNAL INTELLIGENCE ACTIVE';
+  position:absolute;
+  right:0;top:0;
+  font-size:10px;letter-spacing:.16em;
+  color:#3b8b4c;
+  pointer-events:none;
+}
+.hero .eyebrow,.section-header .eyebrow {font-size:11px;color:#79ff96}
+.hero h1 {
+  font-family:'Chakra Petch', 'Share Tech Mono', monospace;
+  text-transform:uppercase;
+  font-size:clamp(37px,3.65vw,59px);
+  font-weight:700;
+  letter-spacing:-.038em;
+  line-height:1.08;
+  text-shadow: 0 0 22px rgba(76,255,119,.14);
+}
+.hero h1 em {color:#61ff78;text-shadow: 0 0 17px rgba(72,255,104,.35)}
+.hero p {color:var(--sub); font-size:14px}
+.primary {
+  background:#54e76f;
+  color:#031007;
+  border-color:#80ffa0;
+  border-radius:3px;
+  text-transform:uppercase;
+  letter-spacing:.035em;
+  box-shadow: 0 0 20px rgba(35,255,95,.11),inset 0 0 12px rgba(227,255,229,.08);
+}
+.primary:hover {box-shadow:0 0 23px rgba(81,255,121,.27);filter:brightness(1.07)}
+.secondary,.refresh-chart-button,.timeframe-btn,.trade-window-buttons button {
+  background:#071b0e;
+  color:var(--sub);
+  border-color:var(--line);
+  border-radius:3px;
+  text-transform:uppercase;
+  letter-spacing:.035em;
+}
+.secondary:hover,.refresh-chart-button:hover,.timeframe-btn:hover,.trade-window-buttons button:hover {
+  color:var(--green);border-color:#58b76b;background:#0c2714;
+}
+.timeframe-btn.active,.trade-window-buttons button.active {
+  background:#143e1f;
+  color:#8aff9d;
+  border-color:#65df7d;
+  box-shadow:0 0 0 1px rgba(66,235,92,.12),0 0 12px rgba(34,255,84,.1);
+}
+.metric-grid {
+  background:rgba(5,17,8,.97);
+  border-color:#275b36;
+  border-radius:3px;
+  box-shadow:inset 0 0 40px rgba(14,60,25,.12),0 0 20px rgba(21,112,40,.05);
+}
+.metric{border-right-color:var(--line)}
+.metric-value {
+  color:var(--green);
+  text-shadow:0 0 14px rgba(64,252,103,.22);
+  font-family:'Chakra Petch','Share Tech Mono',monospace;
+  font-weight:600;
+}
+.metric-hint{color:var(--sub)}
+.section-header h2,.subheader h3,.modal-head h2 {
+  color:#caffd4;
+  font-family:'Chakra Petch','Share Tech Mono',monospace;
+  text-transform:uppercase;
+  font-weight:700;
+  letter-spacing:.015em;
+}
+.section-header h2::before,.subheader h3::before {content:'> ';color:var(--green)}
+.section-header p {color:var(--sub)}
+.count {color:var(--green)}
+.data-tag,.chart-toolbar,.trade-overlay-panel {
+  background:#06160a;
+  border:1px solid #255c35;
+  border-radius:3px;
+}
+.chart-toolbar-label,.detail-chart-toolbar>span {color:var(--green)}
+.controls input,.controls select,#detail-trade-select {
+  color:var(--text);
+  border-color:#2b5d39;
+  background:#05150b;
+  border-radius:3px;
+}
+.controls input::placeholder {color:#638f6d}
+.legend {color:var(--sub)}
+.signal-tile,.coin-card,.portfolio,.method-card {
+  position:relative;
+  border-radius:3px;
+  background:linear-gradient(157deg,#0a1c0e 0%,#07140a 62%,#06120a 100%);
+  border-color:#285536;
+  box-shadow:inset 0 1px 0 rgba(122,255,143,.055);
+}
+.signal-tile:not(.near-tile):not(.breakout-tile):hover,.coin-card:not(.near-signal-card):not(.confirmed-signal-card):hover {
+  border-color:#5dbd73;
+  box-shadow:0 0 13px rgba(49,225,89,.13);
+}
+.symbol { color:#ecfff0; font-family:'Chakra Petch','Share Tech Mono',monospace;letter-spacing:.018em}
+.pair-quote { color:#6daa7b }
+.score {color:#80ff95;text-shadow:0 0 13px rgba(67,255,103,.23)}
+.score-label,.small-muted,.card-bottom,.tile-details {color:var(--sub)}
+.tile-label,.card-stage.confirmed {
+  border-color:#2e874a;
+  background:#0a2a17;
+  color:#80ff98;
+  border-radius:2px;
+}
+.card-stage.approaching {background:#11251a;color:#b5f5c5;border-color:#345b40}
+.card-stage.watch{background:#242611;color:#dbe982;border-color:#676e30}
+.card-indicators {border-top-color:#2a5231}
+.meter-track,.mini-progress {background:#173321}
+.meter-fill,.mini-progress>span{background:linear-gradient(90deg,#1b7131,#63ff85)}
+.detail-indicator {
+  background:#081c0e;
+  border-color:#28593a;
+  border-radius:3px;
+}
+.detail-indicator span {color:var(--sub)}
+.detail-indicator strong {color:#8effa3}
+.chart-refresh-line {color:var(--sub)}
+.portfolio h3,.method-card h3 {color:#baffc7}
+.portfolio .net {color:var(--text)}
+.portfolio .net.pos {color:var(--green)}
+.portfolio .net.neg {color:var(--red)}
+.notice {background:#1a210d;border-color:#55642d;color:#e2f0a7;border-radius:3px}
+.notice.active {background:#0c2914;border-color:#3a9250;color:var(--green)}
+.table-scroll {border-color:#275b36;border-radius:3px}
+th {background:#092010;color:#a7ecb2;border-bottom:1px solid #2a6239}
+td {border-top-color:#1c4629}
+.trade-ledger-row:hover td,.trade-ledger-row:focus td {background:#0f3018;color:var(--text)}
+.modal-panel {
+  background:#041009;
+  border:1px solid #397748;
+  border-radius:4px;
+  box-shadow:0 0 0 1px #0c2915,0 0 65px rgba(40,212,73,.16);
+}
+.modal-backdrop {background:rgba(0,6,2,.86)}
+.close {color:var(--green)}
+.close:hover {text-shadow:0 0 13px var(--green)}
+.explanation,.limitations p,.method-card p {color:var(--sub)}
+.limitations {background:#06170b;border-color:#275235;border-radius:3px}
+footer {border-top-color:#265335;color:var(--sub)}
+/* Safety/risk semantics remain red, not green; preserve double outline and pulse. */
+.signal-tile.near-tile,.coin-card.near-signal-card {
+  border-color:#f3687d;
+  box-shadow:0 0 0 1px rgba(243,104,125,.17),0 0 15px rgba(255,61,94,.11);
+}
+.signal-tile.breakout-tile,.coin-card.confirmed-signal-card {
+  border-color:#ff6b82;
+  outline-color:#c02f4c;
+  box-shadow:inset 0 0 0 1px rgba(255,112,132,.25),0 0 20px rgba(250,85,109,.20);
+}
+.breakout-tile .tile-label,.signal-tile.near-tile .tile-label {background:#31141d;color:#ffacb9;border-color:#bd4560}
+/* Preserve the chart's existing semantic red/green candlesticks and trade lines. */
+@media(max-width:1060px){.hero::before{display:none}}
+@media(max-width:700px){.hero h1{font-size:clamp(32px,8.5vw,48px)}.sidebar::before{display:none}.hero{padding-top:8px}.section-header h2{font-size:20px}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}body::after{opacity:.15}}

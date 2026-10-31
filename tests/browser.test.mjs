@@ -72,6 +72,19 @@ try{
   assert.ok(analysed>=50,`Expected research sample; got ${analysed}`);
   assert.ok(signals>=1,'Expected fixture breakout signal');
   assert.ok((await page.locator('.coin-card').count())>=200,'Expected cards');
+  // Visual-only Matrix theme: preserve the existing red breakout risk semantics.
+  const matrixTheme=await page.evaluate(()=>({
+    font:getComputedStyle(document.documentElement).fontFamily,
+    bg:getComputedStyle(document.documentElement).getPropertyValue('--bg').trim(),
+    glow:getComputedStyle(document.querySelector('.brand strong')).textShadow,
+    nearColor:getComputedStyle(document.querySelector('.near-tile')).borderTopColor,
+    confirmedColor:getComputedStyle(document.querySelector('.breakout-tile')).outlineColor,
+  }));
+  assert.match(matrixTheme.font,/Share Tech Mono/,'Terminal typography must be enabled');
+  assert.equal(matrixTheme.bg,'#020704','Dark Matrix palette must be active');
+  assert.notEqual(matrixTheme.glow,'none','Header text has subtle phosphor glow');
+  assert.match(matrixTheme.nearColor,/rgb\(243, 104, 125\)/,'Near-breakout alerts remain red');
+
   assert.ok(+(await page.locator('#metric-near').innerText())>=1,'Expected pre-breakout candidates');
   assert.equal(await page.locator('.coin-card').first().getAttribute('data-symbol'),'NEARUSDT','Approaching resistance must sort before already confirmed breakouts');
   assert.equal(await page.locator('.coin-card[data-symbol="NEARUSDT"] .card-stage').innerText(),'APPROACHING');
